@@ -1,0 +1,187 @@
+@import 'antd/dist/reset.css';
+
+:root {
+  --ant-content-bg: #f5f5f5;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--ant-content-bg);
+}
+
+.main-layout {
+  min-height: 100vh;
+}
+
+.logo-container {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.header {
+  background: #fff !important;
+  padding: 0 24px !important;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.content {
+  margin: 24px;
+  min-height: 280px;
+}
+
+/* ===== Todo Container ===== */
+.todo-container {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+/* ===== Input Area ===== */
+.todo-input-area {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+}
+
+.todo-input-area .todo-input {
+  flex: 1;
+  border-radius: 10px 0 0 10px !important;
+}
+
+.todo-input-area .todo-add-btn {
+  border-radius: 0 10px 10px 0 !important;
+  min-width: 100px;
+}
+
+/* ===== Todo Item ===== */
+.todo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: background-color 0.2s;
+}
+
+.todo-item:hover {
+  background-color: #fafafa;
+}
+
+.todo-item-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 12px;
+  min-width: 0;
+}
+
+.todo-item-left > div:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== Signed Out ===== */
+.signed-out-container {
+  height: calc(100vh - 160px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 16px;
+  margin: 20px;
+}
+
+.signed-out-card {
+  width: 480px;
+  max-width: 100%;
+  text-align: center;
+  padding: 40px 20px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+  border-radius: 24px;
+}
+
+/* ===== Responsive: Tablet ===== */
+@media (max-width: 768px) {
+  .todo-container {
+    margin: 24px auto;
+    padding: 0 12px;
+  }
+
+  .content {
+    margin: 12px !important;
+    padding: 16px !important;
+  }
+
+  .signed-out-container {
+    margin: 12px;
+    height: calc(100vh - 120px);
+  }
+
+  .signed-out-card {
+    width: 90%;
+    padding: 32px 16px;
+  }
+}
+
+/* ===== Responsive: Mobile ===== */
+@media (max-width: 576px) {
+  .todo-container {
+    margin: 16px auto;
+    padding: 0 8px;
+  }
+
+  .todo-input-area {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .todo-input-area .todo-input {
+    border-radius: 10px !important;
+  }
+
+  .todo-input-area .todo-add-btn {
+    border-radius: 10px !important;
+    width: 100%;
+    min-width: unset;
+  }
+
+  .todo-item {
+    padding: 12px 4px !important;
+  }
+
+  .todo-item-left {
+    gap: 8px;
+  }
+
+  .todo-tag {
+    display: none;
+  }
+
+  .content {
+    margin: 8px !important;
+    padding: 12px !important;
+  }
+
+  .signed-out-container {
+    margin: 8px;
+    border-radius: 12px;
+  }
+
+  .signed-out-card {
+    padding: 24px 12px;
+    border-radius: 16px !important;
+  }
+}
