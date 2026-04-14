@@ -190,7 +190,7 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
         placement="left"
         onClose={() => setIsMobileMenuOpen(false)}
         open={isMobileMenuOpen}
-        width={280}
+        size="default"
         styles={{ body: { padding: '1.5rem' } }}
         className="mobile-drawer"
       >
