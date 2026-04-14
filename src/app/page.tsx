@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import {
   App,
   Button,
@@ -24,31 +24,22 @@ import {
   FireOutlined,
   PlusOutlined,
   RobotOutlined,
+  SearchOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
+import { DatePicker } from 'antd';
 import { SignInButton, useUser } from '@clerk/nextjs';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
+import { useI18n } from '@/components/I18nProvider';
 
 const { Text, Title } = Typography;
-const AI_BREAKDOWN_PREFIX = '[[AI_BREAKDOWN]]';
-
-interface Todo {
-  id: string;
-  text: string;
-  is_completed: boolean;
-  priority: string;
-  user_id: string;
-  created_at: string;
-}
+import { AI_BREAKDOWN_PREFIX, parseTodo, encodeAiBreakdownText, encodeNormalTodoText } from '@/lib/todoUtils';
 
 type AiBreakdownTask = {
   title: string;
   priority: 'high' | 'medium' | 'low';
-};
-
-type ParsedTodo = Todo & {
-  displayText: string;
-  groupTitle: string | null;
 };
 
 type TodoListEntry =
@@ -70,46 +61,7 @@ function isValidAiBreakdownTasks(value: unknown): value is AiBreakdownTask[] {
   );
 }
 
-function encodeAiBreakdownText(goal: string, title: string) {
-  return `${AI_BREAKDOWN_PREFIX}${JSON.stringify({
-    goal: goal.trim(),
-    title: title.trim(),
-  })}`;
-}
-
-function parseTodo(todo: Todo): ParsedTodo {
-  if (!todo.text.startsWith(AI_BREAKDOWN_PREFIX)) {
-    return {
-      ...todo,
-      displayText: todo.text,
-      groupTitle: null,
-    };
-  }
-
-  const payload = todo.text.slice(AI_BREAKDOWN_PREFIX.length);
-
-  try {
-    const parsed = JSON.parse(payload) as { goal?: unknown; title?: unknown };
-    const goal = typeof parsed.goal === 'string' ? parsed.goal.trim() : '';
-    const title = typeof parsed.title === 'string' ? parsed.title.trim() : '';
-
-    if (!goal || !title) {
-      throw new Error('Invalid AI breakdown payload');
-    }
-
-    return {
-      ...todo,
-      displayText: title,
-      groupTitle: goal,
-    };
-  } catch {
-    return {
-      ...todo,
-      displayText: todo.text,
-      groupTitle: null,
-    };
-  }
-}
+// AI breakdown functions moved to todoUtils.ts
 
 function formatTimeLabel(todo: Todo, index: number) {
   const createdAt = new Date(todo.created_at);
@@ -125,6 +77,15 @@ function formatTimeLabel(todo: Todo, index: number) {
 }
 
 export default function Home() {
+  return (
+    <Suspense fallback={<div className="workspace-home"><Skeleton active paragraph={{ rows: 10 }} /></div>}>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
+  const { t, language } = useI18n();
   const { isLoaded, isSignedIn, user } = useUser();
   const { message, notification, modal } = App.useApp();
 
@@ -136,19 +97,54 @@ export default function Home() {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'completed'>('all');
   const [breakingDown, setBreakingDown] = useState(false);
+  const searchParams = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [newPriority, setNewPriority] = useState<'normal' | 'urgent'>('normal');
+  const [scheduledDate, setScheduledDate] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSearchQuery(searchParams.get('q') || '');
+  }, [searchParams]);
 
   const inputRef = useRef<InputRef>(null);
 
   const filteredTodos = useMemo(() => {
+    let result = todos;
+
+    // Filter by Today (Today means no due date, or due date is today)
+    const locale = language === 'zh' ? 'zh-CN' : 'en-US';
+    const todayStr = new Date().toLocaleDateString(locale);
+    
+    result = result.filter(todo => {
+      const parsed = parseTodo(todo);
+      const isToday = !parsed.due_date || new Date(parsed.due_date).toLocaleDateString(locale) === todayStr;
+      return isToday;
+    });
+
+    // Filter by tab
     switch (activeTab) {
       case 'active':
-        return todos.filter((todo) => !todo.is_completed);
+        result = result.filter((todo) => !todo.is_completed);
+        break;
       case 'completed':
-        return todos.filter((todo) => todo.is_completed);
-      default:
-        return todos;
+        result = result.filter((todo) => todo.is_completed);
+        break;
     }
-  }, [todos, activeTab]);
+
+    // Filter by search
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((todo) => {
+        const parsed = parseTodo(todo);
+        return (
+          parsed.displayText.toLowerCase().includes(q) ||
+          (parsed.groupTitle && parsed.groupTitle.toLowerCase().includes(q))
+        );
+      });
+    }
+
+    return result;
+  }, [todos, activeTab, searchQuery]);
 
   const todoListEntries = useMemo<TodoListEntry[]>(() => {
     const parsedTodos = filteredTodos.map(parseTodo);
@@ -204,7 +200,7 @@ export default function Home() {
 
       if (error) {
         notification.error({
-          message: '加载任务失败',
+          message: t('loadTasksFailed'),
           description: error.message,
           placement: 'topRight',
         });
@@ -222,16 +218,16 @@ export default function Home() {
     const text = inputValue.trim();
 
     if (!text) {
-      message.warning('先写下一件要完成的事');
+      message.warning(t('writeSomethingFirst'));
       return;
     }
     if (!user) return;
 
     setAdding(true);
     const newTodo = {
-      text,
+      text: encodeNormalTodoText(text, scheduledDate || undefined),
       is_completed: false,
-      priority: 'normal',
+      priority: newPriority,
       user_id: user.id,
     };
 
@@ -239,14 +235,15 @@ export default function Home() {
 
     if (error) {
       notification.error({
-        message: '添加任务失败',
+        message: t('addFailed'),
         description: error.message,
         placement: 'topRight',
       });
     } else {
       setTodos((prev) => [data, ...prev]);
       setInputValue('');
-      message.success('任务已加入清单');
+      setNewPriority('normal');
+      message.success(t('taskAdded'));
       inputRef.current?.focus();
     }
 
@@ -258,7 +255,7 @@ export default function Home() {
 
     const goal = inputValue.trim();
     if (!goal) {
-      message.warning('先输入一个较大的目标，例如：准备雅思考试');
+      message.warning(t('aiGoalPrompt'));
       return;
     }
     if (!user) return;
@@ -280,7 +277,7 @@ export default function Home() {
 
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({}));
-        throw new Error(errorData.error || 'AI 服务响应异常');
+        throw new Error(errorData.error || t('aiFailed'));
       }
 
       const tasks: unknown = await resp.json();
@@ -303,18 +300,19 @@ export default function Home() {
 
       setTodos((prev) => [...(data || []), ...prev]);
       setInputValue('');
-      message.success('AI 已帮你拆解成可执行任务');
+      setNewPriority('normal');
+      message.success(t('aiSuccess'));
     } catch (error: unknown) {
       if (error instanceof Error && error.name === 'AbortError') {
         notification.warning({
-          message: '请求超时',
-          description: '网络有点忙，请稍后再试',
+          message: t('aiTimeout'),
+          description: t('aiTimeout'),
           placement: 'topRight',
         });
       } else {
         notification.error({
-          message: 'AI 拆解失败',
-          description: error instanceof Error ? error.message : 'AI 拆解服务暂时不可用',
+          message: t('aiFailed'),
+          description: error instanceof Error ? error.message : t('aiFailed'),
           placement: 'topRight',
         });
       }
@@ -340,7 +338,7 @@ export default function Home() {
 
     if (error) {
       notification.error({
-        message: '更新状态失败',
+        message: t('statusUpdateFailed'),
         description: error.message,
         placement: 'topRight',
       });
@@ -357,14 +355,56 @@ export default function Home() {
     });
   };
 
+  const handleUpdate = async (id: string, updates: Partial<Todo>) => {
+    if (!user) return;
+
+    const { error } = await supabase.from('todos').update(updates).eq('id', id).eq('user_id', user.id);
+
+    if (error) {
+      notification.error({
+        message: t('updateFailed'),
+        description: error.message,
+        placement: 'topRight',
+      });
+    } else {
+      setTodos((prev) => prev.map((todo) => (todo.id === id ? { ...todo, ...updates } : todo)));
+    }
+  };
+
+  const handleClearCompleted = () => {
+    const completedIds = todos.filter((t) => t.is_completed).map((t) => t.id);
+    if (completedIds.length === 0) return;
+
+    modal.confirm({
+      title: t('clearCompletedTitle'),
+      content: t('clearCompletedConfirm', { count: completedIds.length }),
+      okText: t('clearCompletedOk'),
+      okType: 'danger',
+      onOk: async () => {
+        const { error } = await supabase
+          .from('todos')
+          .delete()
+          .in('id', completedIds)
+          .eq('user_id', user?.id);
+
+        if (error) {
+          notification.error({ message: t('clearCompleted'), description: error.message });
+        } else {
+          setTodos((prev) => prev.filter((t) => !t.is_completed));
+          message.success(t('clearCompletedSuccess'));
+        }
+      },
+    });
+  };
+
   const handleDelete = (id: string) => {
     modal.confirm({
-      title: '确定删除这个任务吗？',
+      title: t('deleteTaskTitle'),
       icon: <ExclamationCircleOutlined />,
-      content: '删除后无法恢复。',
-      okText: '删除',
+      content: t('deleteTaskDesc'),
+      okText: t('deleteOk'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       async onOk() {
         if (!user) return;
         setDeletingIds((prev) => new Set(prev).add(id));
@@ -373,13 +413,13 @@ export default function Home() {
 
         if (error) {
           notification.error({
-            message: '删除任务失败',
+            message: t('deleteFailed'),
             description: error.message,
             placement: 'topRight',
           });
         } else {
           setTodos((prev) => prev.filter((todo) => todo.id !== id));
-          message.success('任务已删除');
+          message.success(t('deleteSuccess'));
         }
 
         setDeletingIds((prev) => {
@@ -391,50 +431,17 @@ export default function Home() {
     });
   };
 
-  const renderTodoRow = (item: ParsedTodo, index: number, compact = false) => (
-    <article key={item.id} className={`task-row${item.is_completed ? ' is-complete' : ''}`}>
-      <div className="task-row-main">
-        <Checkbox
-          checked={item.is_completed}
-          onChange={() => toggleComplete(item.id)}
-          disabled={togglingIds.has(item.id)}
-        />
-        <div className="task-row-copy">
-          <h4>{item.displayText}</h4>
-          <div className="task-row-meta">
-            <span>
-              <ClockCircleOutlined />
-              {formatTimeLabel(item, index)}
-            </span>
-            {item.groupTitle ? (
-              <span>
-                <RobotOutlined />
-                AI breakdown
-              </span>
-            ) : (
-              <span>
-                <CalendarOutlined />
-                Today
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="task-row-actions">
-        <Tag color={item.priority === 'urgent' ? 'error' : 'processing'} bordered={false}>
-          {item.priority === 'urgent' ? 'High focus' : 'Steady pace'}
-        </Tag>
-        <Button
-          type="text"
-          danger
-          icon={<DeleteOutlined />}
-          loading={deletingIds.has(item.id)}
-          disabled={deletingIds.has(item.id)}
-          onClick={() => handleDelete(item.id)}
-        />
-      </div>
-    </article>
+  const renderTodoRow = (item: ParsedTodo, index: number) => (
+    <TodoItem
+      key={item.id}
+      item={item}
+      index={index}
+      togglingIds={togglingIds}
+      deletingIds={deletingIds}
+      onToggle={toggleComplete}
+      onDelete={handleDelete}
+      onUpdate={handleUpdate}
+    />
   );
 
   if (!isLoaded) {
@@ -452,19 +459,17 @@ export default function Home() {
       <section className="workspace-home">
         <div className="signed-out-hero">
           <div className="signed-out-copy">
-            <span className="eyebrow">A calm planning ritual</span>
-            <Title>让待办列表从“堆任务”变成“会呼吸的工作台”</Title>
-            <Text>
-              登录后你可以记录日常任务，也可以把一个大目标交给 AI，自动拆成清晰可执行的小步骤。
-            </Text>
+            <span className="eyebrow">{t('heroEyebrow')}</span>
+            <Title>{t('heroTitle')}</Title>
+            <Text>{t('heroDesc')}</Text>
             <div className="signed-out-actions">
               <SignInButton mode="modal">
                 <Button type="primary" size="large">
-                  立即登录
+                  {t('signInNow')}
                 </Button>
               </SignInButton>
               <Button size="large" icon={<RobotOutlined />} disabled>
-                AI 拆解示例
+                {t('aiBreakdownExample')}
               </Button>
             </div>
           </div>
@@ -473,20 +478,20 @@ export default function Home() {
             <div className="preview-orb" />
             <div className="preview-card">
               <span className="eyebrow">Focus workflow</span>
-              <h3>从一个目标开始</h3>
-              <p>例如“准备雅思考试”或“上线新版本”，系统会帮你沉淀成今天就能推进的下一步。</p>
+              <h3>{t('startWithGoal')}</h3>
+              <p>{t('startWithGoalDesc')}</p>
               <div className="preview-list">
                 <div>
                   <CheckCircleOutlined />
-                  <span>保存任务并同步到你的账户</span>
+                  <span>{t('saveAndSync')}</span>
                 </div>
                 <div>
                   <RobotOutlined />
-                  <span>一键拆解大任务，自动生成子任务组</span>
+                  <span>{t('oneClickBreakdown')}</span>
                 </div>
                 <div>
                   <ThunderboltOutlined />
-                  <span>在同一个页面里处理今天、进行中和已完成</span>
+                  <span>{t('allInOne')}</span>
                 </div>
               </div>
             </div>
@@ -502,23 +507,22 @@ export default function Home() {
         <div>
           <span className="eyebrow">Today dashboard</span>
           <h2>
-            早上好，{user?.firstName || user?.username || '朋友'}
-            <span> 先把注意力留给最重要的事。</span>
+            {t('goodMorning')}{user?.firstName || user?.username || t('friend')}
+            <span>{t('attentionPrompt')}</span>
           </h2>
           <p>
-            你当前有 {activeCount} 个进行中任务，已完成 {completedCount} 个。输入一件下一步要做的事，或者输入一个大目标交给
-            AI 拆解。
+            {t('statsSummary', { active: activeCount, completed: completedCount })}
           </p>
         </div>
 
         <div className="hero-stats">
           <div className="hero-stat-card">
             <strong>{focusScore}%</strong>
-            <span>Focus score</span>
+            <span>{t('focusScore')}</span>
           </div>
           <div className="hero-stat-card soft">
-            <strong>{streakDays} days</strong>
-            <span>Steady streak</span>
+            <strong>{streakDays} {t('days')}</strong>
+            <span>{t('steadyStreak')}</span>
           </div>
         </div>
       </section>
@@ -531,13 +535,27 @@ export default function Home() {
           ref={inputRef}
           className="composer-input"
           variant="borderless"
-          placeholder="写下下一件事，或输入一个大目标让 AI 帮你拆解"
+          placeholder={t('composerPlaceholder')}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onPressEnter={handleAdd}
           disabled={adding || breakingDown}
         />
         <div className="composer-actions">
+          <Tag
+            color={newPriority === 'urgent' ? 'error' : 'processing'}
+            variant="filled"
+            style={{ cursor: 'pointer', padding: '4px 12px', borderRadius: '12px' }}
+            onClick={() => setNewPriority(newPriority === 'urgent' ? 'normal' : 'urgent')}
+          >
+            {newPriority === 'urgent' ? t('highFocus') : t('steadyPace')}
+          </Tag>
+          <DatePicker 
+            placeholder={t('scheduleOptional')} 
+            variant="borderless" 
+            style={{ width: 150 }}
+            onChange={(_, dateString) => setScheduledDate(Array.isArray(dateString) ? dateString[0] : dateString)} 
+          />
           <Button
             size="large"
             icon={<RobotOutlined />}
@@ -545,7 +563,7 @@ export default function Home() {
             loading={breakingDown}
             disabled={adding || breakingDown}
           >
-            AI 拆解
+            {t('aiBreakdown')}
           </Button>
           <Button
             type="primary"
@@ -555,7 +573,7 @@ export default function Home() {
             loading={adding}
             disabled={breakingDown}
           >
-            添加任务
+            {t('addTask')}
           </Button>
         </div>
       </section>
@@ -564,14 +582,14 @@ export default function Home() {
         <section className="tasks-column">
           <div className="section-heading">
             <div>
-              <h3>Today</h3>
-              <p>按节奏推进今天的任务，完成的事项会沉到下方。</p>
+              <h3>{t('today')}</h3>
+              <p>{t('todayTasksDesc')}</p>
             </div>
             <div className="filter-pills">
               {[
-                { key: 'all', label: `全部 ${totalCount}` },
-                { key: 'active', label: `进行中 ${activeCount}` },
-                { key: 'completed', label: `已完成 ${completedCount}` },
+                { key: 'all', label: `${t('all')} ${totalCount}` },
+                { key: 'active', label: `${t('inProgress')} ${activeCount}` },
+                { key: 'completed', label: `${t('completed')} ${completedCount}` },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -583,6 +601,11 @@ export default function Home() {
                 </button>
               ))}
             </div>
+            {completedCount > 0 && (
+              <Button type="text" danger size="small" onClick={handleClearCompleted}>
+                {t('clearCompleted')}
+              </Button>
+            )}
           </div>
 
           <div className="task-list-surface">
@@ -594,15 +617,15 @@ export default function Home() {
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
                     activeTab === 'all'
-                      ? '还没有任务，先写下今天最重要的一件事。'
+                      ? t('noTasksTitle')
                       : activeTab === 'active'
-                        ? '当前没有进行中的任务。'
-                        : '还没有已完成的任务，开始推进吧。'
+                        ? t('noActiveTasks')
+                        : t('noCompletedTasks')
                   }
                 >
                   {activeTab === 'all' && (
                     <Button type="primary" onClick={() => inputRef.current?.focus()}>
-                      开始添加
+                      {t('startAdding')}
                     </Button>
                   )}
                 </Empty>
@@ -617,16 +640,16 @@ export default function Home() {
                       <section key={entry.key} className="task-group">
                         <div className="task-group-head">
                           <div>
-                            <span className="eyebrow">AI breakdown</span>
+                            <span className="eyebrow">{t('aiBreakdownTag')}</span>
                             <h4>{entry.title}</h4>
                           </div>
-                          <Tag color="processing" bordered={false}>
-                            {entry.todos.length} 个子任务
+                          <Tag color="processing" variant="filled">
+                            {t('subtasksCount', { count: entry.todos.length })}
                           </Tag>
                         </div>
                         <div className="task-group-list">
                           {entry.todos.map((todo, todoIndex) =>
-                            renderTodoRow(todo, todoIndex, true)
+                            renderTodoRow(todo, todoIndex)
                           )}
                         </div>
                       </section>
@@ -642,33 +665,33 @@ export default function Home() {
           <section className="insight-card">
             <div className="section-heading compact">
               <div>
-                <h3>Overview</h3>
-                <p>用最少的信息，快速看清今天的推进状态。</p>
+                <h3>{t('overviewTitle')}</h3>
+                <p>{t('overviewDesc')}</p>
               </div>
             </div>
 
             <div className="metric-stack">
               <div className="metric-row">
-                <span>Daily completion</span>
+                <span>{t('dailyCompletion')}</span>
                 <strong>{focusScore}%</strong>
               </div>
-              <Progress percent={focusScore} showInfo={false} strokeColor="#006592" trailColor="#dde3eb" />
+              <Progress percent={focusScore} showInfo={false} strokeColor="#006592" railColor="#dde3eb" />
               <div className="metric-grid">
                 <div>
                   <strong>{totalCount}</strong>
-                  <span>All tasks</span>
+                  <span>{t('allTasks')}</span>
                 </div>
                 <div>
                   <strong>{activeCount}</strong>
-                  <span>In progress</span>
+                  <span>{t('inProgress')}</span>
                 </div>
                 <div>
                   <strong>{completedCount}</strong>
-                  <span>Completed</span>
+                  <span>{t('completed')}</span>
                 </div>
                 <div>
                   <strong>{groupedEntries.length}</strong>
-                  <span>AI groups</span>
+                  <span>{t('aiGroups')}</span>
                 </div>
               </div>
             </div>
@@ -677,13 +700,13 @@ export default function Home() {
           <section className="insight-card muted">
             <div className="section-heading compact">
               <div>
-                <h3>Next horizon</h3>
-                <p>从当前清单中挑两项，假设为你接下来要衔接的任务。</p>
+                <h3>{t('nextHorizonTitle')}</h3>
+                <p>{t('nextHorizonDesc')}</p>
               </div>
             </div>
             <div className="tomorrow-list">
               {tomorrowPreview.length === 0 ? (
-                <p className="placeholder-copy">今天先创建几个任务，这里会自动出现下一步预览。</p>
+                <p className="placeholder-copy">{t('placeholderPreview')}</p>
               ) : (
                 tomorrowPreview.map((entry, index) => {
                   const todo = entry.type === 'single' ? entry.todo : entry.todos[0];
@@ -692,7 +715,7 @@ export default function Home() {
                       <span className="tomorrow-dot" />
                       <div>
                         <p>{todo.displayText}</p>
-                        <span>{index === 0 ? '优先处理' : '后续衔接'}</span>
+                        <span>{index === 0 ? (language === 'zh' ? '优先处理' : 'Top priority') : (language === 'zh' ? '后续衔接' : 'Next bridge')}</span>
                       </div>
                     </div>
                   );
@@ -705,7 +728,7 @@ export default function Home() {
             <div className="wisdom-overlay" />
             <div className="wisdom-content">
               <FireOutlined />
-              <p>“真正的效率，不是把一切塞满，而是让重要的事情拥有足够安静的空间。”</p>
+              <p>{t('wisdomQuote')}</p>
               <span>Todo Vibe ritual</span>
             </div>
           </section>
@@ -714,12 +737,12 @@ export default function Home() {
             <div className="mini-stat-card">
               <CheckCircleOutlined />
               <strong>{completedCount}</strong>
-              <span>Done today</span>
+              <span>{t('doneToday')}</span>
             </div>
             <div className="mini-stat-card">
               <ClockCircleOutlined />
               <strong>{Math.max(1, Math.ceil(activeCount * 0.8))}h</strong>
-              <span>Focus estimate</span>
+              <span>{t('focusEstimate')}</span>
             </div>
           </section>
         </aside>
@@ -727,7 +750,7 @@ export default function Home() {
 
       <section className="mobile-cta">
         <Button type="primary" size="large" icon={<ArrowRightOutlined />} onClick={() => inputRef.current?.focus()}>
-          添加下一件事
+          {t('addNextThing')}
         </Button>
       </section>
     </section>

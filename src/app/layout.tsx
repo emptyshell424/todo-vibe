@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { ClerkProvider } from "@clerk/nextjs";
 import AppLayout from "@/components/AppLayout";
+import { I18nProvider } from "@/components/I18nProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +20,9 @@ export default function RootLayout({
       <html lang="zh-CN">
         <body suppressHydrationWarning>
           <AntdRegistry>
-            <AppLayout>{children}</AppLayout>
+            <I18nProvider>
+              <AppLayout>{children}</AppLayout>
+            </I18nProvider>
           </AntdRegistry>
         </body>
       </html>
