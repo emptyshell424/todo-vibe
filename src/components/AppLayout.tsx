@@ -7,6 +7,8 @@ import { Show, SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useI18n } from './I18nProvider';
+import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
 
 function SidebarContent({ navigationItems, pathname, router, t, setIsSettingsOpen, user, onNavigate }: any) {
   return (
@@ -40,18 +42,17 @@ function SidebarContent({ navigationItems, pathname, router, t, setIsSettingsOpe
           }
 
           return (
-            <button
+            <Link
               key={item.key}
-              type="button"
+              href={item.key}
               className={className}
               onClick={() => {
-                router.push(item.key);
                 onNavigate?.();
               }}
             >
               <span className="sidebar-link-icon">{item.icon}</span>
               <span>{item.label}</span>
-            </button>
+            </Link>
           );
         })}
       </nav>
@@ -282,7 +283,19 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="workspace-content">{children}</main>
+        <main className="workspace-content">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              {children}
+            </motion.div>
+          </AnimatePresence>
+        </main>
       </div>
 
       <Modal
