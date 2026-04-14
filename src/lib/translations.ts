@@ -34,6 +34,7 @@ export const translations = {
 
     // Home Page - Signed In
     goodMorning: 'Good morning, ',
+    todayDashboard: 'Today Dashboard',
     friend: 'friend',
     attentionPrompt: ' Keep your focus on what matters most.',
     statsSummary: 'You have {active} tasks in progress, and {completed} completed. Enter your next step, or give a big goal to AI.',
@@ -169,6 +170,7 @@ export const translations = {
 
     // Home Page - Signed In
     goodMorning: '早上好，',
+    todayDashboard: '今日工作板',
     friend: '朋友',
     attentionPrompt: ' 先把注意力留给最重要的事。',
     statsSummary: '你当前有 {active} 个进行中任务，已完成 {completed} 个。输入一件下一步要做的事，或者输入一个大目标交给 AI。',
