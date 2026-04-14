@@ -8,9 +8,12 @@ import {
   Empty,
   Input,
   type InputRef,
+  Pagination,
   Progress,
+  Segmented,
   Skeleton,
   Spin,
+  Tabs,
   Tag,
   Typography,
 } from 'antd';
@@ -33,6 +36,7 @@ import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
 import { useI18n } from '@/components/I18nProvider';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const { Text, Title } = Typography;
 import { AI_BREAKDOWN_PREFIX, parseTodo, encodeAiBreakdownText, encodeNormalTodoText } from '@/lib/todoUtils';
@@ -101,10 +105,17 @@ function HomeContent() {
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [newPriority, setNewPriority] = useState<'normal' | 'urgent'>('normal');
   const [scheduledDate, setScheduledDate] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
 
   useEffect(() => {
     setSearchQuery(searchParams.get('q') || '');
+    setCurrentPage(1);
   }, [searchParams]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   const inputRef = useRef<InputRef>(null);
 
@@ -146,7 +157,7 @@ function HomeContent() {
     return result;
   }, [todos, activeTab, searchQuery]);
 
-  const todoListEntries = useMemo<TodoListEntry[]>(() => {
+  const allTodoListEntries = useMemo<TodoListEntry[]>(() => {
     const parsedTodos = filteredTodos.map(parseTodo);
     const entries: TodoListEntry[] = [];
 
@@ -173,6 +184,11 @@ function HomeContent() {
     return entries;
   }, [filteredTodos]);
 
+  const todoListEntries = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return allTodoListEntries.slice(start, start + pageSize);
+  }, [allTodoListEntries, currentPage]);
+
   const completedCount = useMemo(
     () => todos.filter((todo) => todo.is_completed).length,
     [todos]
@@ -181,8 +197,8 @@ function HomeContent() {
   const activeCount = totalCount - completedCount;
   const focusScore = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
   const streakDays = Math.max(3, Math.min(21, activeCount + 5));
-  const groupedEntries = todoListEntries.filter((entry) => entry.type === 'group');
-  const tomorrowPreview = todoListEntries.slice(0, 2);
+  const groupedEntries = allTodoListEntries.filter((entry) => entry.type === 'group');
+  const tomorrowPreview = allTodoListEntries.slice(0, 2);
 
   useEffect(() => {
     const fetchTodos = async () => {
@@ -200,7 +216,7 @@ function HomeContent() {
 
       if (error) {
         notification.error({
-          message: t('loadTasksFailed'),
+          title: t('loadTasksFailed'),
           description: error.message,
           placement: 'topRight',
         });
@@ -235,7 +251,7 @@ function HomeContent() {
 
     if (error) {
       notification.error({
-        message: t('addFailed'),
+        title: t('addFailed'),
         description: error.message,
         placement: 'topRight',
       });
@@ -243,6 +259,7 @@ function HomeContent() {
       setTodos((prev) => [data, ...prev]);
       setInputValue('');
       setNewPriority('normal');
+      setCurrentPage(1);
       message.success(t('taskAdded'));
       inputRef.current?.focus();
     }
@@ -301,17 +318,18 @@ function HomeContent() {
       setTodos((prev) => [...(data || []), ...prev]);
       setInputValue('');
       setNewPriority('normal');
+      setCurrentPage(1);
       message.success(t('aiSuccess'));
     } catch (error: unknown) {
       if (error instanceof Error && error.name === 'AbortError') {
         notification.warning({
-          message: t('aiTimeout'),
+          title: t('aiTimeout'),
           description: t('aiTimeout'),
           placement: 'topRight',
         });
       } else {
         notification.error({
-          message: t('aiFailed'),
+          title: t('aiFailed'),
           description: error instanceof Error ? error.message : t('aiFailed'),
           placement: 'topRight',
         });
@@ -338,7 +356,7 @@ function HomeContent() {
 
     if (error) {
       notification.error({
-        message: t('statusUpdateFailed'),
+        title: t('statusUpdateFailed'),
         description: error.message,
         placement: 'topRight',
       });
@@ -362,7 +380,7 @@ function HomeContent() {
 
     if (error) {
       notification.error({
-        message: t('updateFailed'),
+        title: t('updateFailed'),
         description: error.message,
         placement: 'topRight',
       });
@@ -388,7 +406,7 @@ function HomeContent() {
           .eq('user_id', user?.id);
 
         if (error) {
-          notification.error({ message: t('clearCompleted'), description: error.message });
+          notification.error({ title: t('clearCompleted'), description: error.message });
         } else {
           setTodos((prev) => prev.filter((t) => !t.is_completed));
           message.success(t('clearCompletedSuccess'));
@@ -413,7 +431,7 @@ function HomeContent() {
 
         if (error) {
           notification.error({
-            message: t('deleteFailed'),
+            title: t('deleteFailed'),
             description: error.message,
             placement: 'topRight',
           });
@@ -504,32 +522,46 @@ function HomeContent() {
   return (
     <section className="workspace-home">
       <section className="hero-strip">
-        <div>
-          <span className="eyebrow">Today dashboard</span>
-          <h2>
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.6 }}
+          className="hero-copy"
+        >
+          <span className="eyebrow secondary-label">{t('todayDashboard')}</span>
+          <h2 className="editorial-header">
             {t('goodMorning')}{user?.firstName || user?.username || t('friend')}
-            <span>{t('attentionPrompt')}</span>
           </h2>
-          <p>
-            {t('statsSummary', { active: activeCount, completed: completedCount })}
-          </p>
-        </div>
+        </motion.div>
 
         <div className="hero-stats">
-          <div className="hero-stat-card">
-            <strong>{focusScore}%</strong>
-            <span>{t('focusScore')}</span>
-          </div>
-          <div className="hero-stat-card soft">
-            <strong>{streakDays} {t('days')}</strong>
-            <span>{t('steadyStreak')}</span>
-          </div>
+          <motion.div 
+            className="hero-stat-card bento-small"
+            whileHover={{ scale: 1.05, y: -5 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          >
+            <strong className="editorial-header">{focusScore}%</strong>
+            <span className="secondary-label">{t('focusScore')}</span>
+          </motion.div>
+          <motion.div 
+            className="hero-stat-card soft bento-small"
+            whileHover={{ scale: 1.05, y: -5 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          >
+            <strong className="editorial-header">{streakDays}</strong>
+            <span className="secondary-label">{t('days')}</span>
+          </motion.div>
         </div>
       </section>
 
-      <section className="composer-panel">
+      <motion.section 
+        className="composer-panel floating"
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.3 }}
+      >
         <div className="composer-icon">
-          <RobotOutlined />
+          <ThunderboltOutlined />
         </div>
         <Input
           ref={inputRef}
@@ -542,29 +574,15 @@ function HomeContent() {
           disabled={adding || breakingDown}
         />
         <div className="composer-actions">
-          <Tag
-            color={newPriority === 'urgent' ? 'error' : 'processing'}
-            variant="filled"
-            style={{ cursor: 'pointer', padding: '4px 12px', borderRadius: '12px' }}
-            onClick={() => setNewPriority(newPriority === 'urgent' ? 'normal' : 'urgent')}
-          >
-            {newPriority === 'urgent' ? t('highFocus') : t('steadyPace')}
-          </Tag>
-          <DatePicker 
-            placeholder={t('scheduleOptional')} 
-            variant="borderless" 
-            style={{ width: 150 }}
-            onChange={(_, dateString) => setScheduledDate(Array.isArray(dateString) ? dateString[0] : dateString)} 
-          />
           <Button
             size="large"
+            type="text"
             icon={<RobotOutlined />}
             onClick={handleAiBreakdown}
             loading={breakingDown}
             disabled={adding || breakingDown}
-          >
-            {t('aiBreakdown')}
-          </Button>
+            title={t('aiBreakdown')}
+          />
           <Button
             type="primary"
             size="large"
@@ -576,13 +594,13 @@ function HomeContent() {
             {t('addTask')}
           </Button>
         </div>
-      </section>
+      </motion.section>
 
       <div className="workspace-grid">
         <section className="tasks-column">
           <div className="section-heading">
             <div>
-              <h3>{t('today')}</h3>
+              <h3 className="editorial-header">{t('today')}</h3>
               <p>{t('todayTasksDesc')}</p>
             </div>
             <div className="filter-pills">
@@ -610,149 +628,168 @@ function HomeContent() {
 
           <div className="task-list-surface">
             <Spin spinning={loading}>
-              {loading ? (
-                <Skeleton active paragraph={{ rows: 6 }} />
-              ) : filteredTodos.length === 0 ? (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    activeTab === 'all'
-                      ? t('noTasksTitle')
-                      : activeTab === 'active'
-                        ? t('noActiveTasks')
-                        : t('noCompletedTasks')
-                  }
-                >
-                  {activeTab === 'all' && (
-                    <Button type="primary" onClick={() => inputRef.current?.focus()}>
-                      {t('startAdding')}
-                    </Button>
-                  )}
-                </Empty>
-              ) : (
-                <div className="task-list-stack">
-                  {todoListEntries.map((entry, index) => {
-                    if (entry.type === 'single') {
-                      return renderTodoRow(entry.todo, index);
-                    }
+              <AnimatePresence mode="popLayout" initial={false}>
+                {loading ? (
+                  <motion.div key="skeleton" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <Skeleton active paragraph={{ rows: 6 }} />
+                  </motion.div>
+                ) : filteredTodos.length === 0 ? (
+                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={
+                        activeTab === 'all'
+                          ? t('noTasksTitle')
+                          : activeTab === 'active'
+                            ? t('noActiveTasks')
+                            : t('noCompletedTasks')
+                      }
+                    >
+                      {activeTab === 'all' && (
+                        <Button type="primary" onClick={() => inputRef.current?.focus()}>
+                          {t('startAdding')}
+                        </Button>
+                      )}
+                    </Empty>
+                  </motion.div>
+                ) : (
+                  <motion.div key="list" className="task-list-stack">
+                    {todoListEntries.map((entry, index) => {
+                      if (entry.type === 'single') {
+                        return renderTodoRow(entry.todo, index);
+                      }
 
-                    return (
-                      <section key={entry.key} className="task-group">
-                        <div className="task-group-head">
-                          <div>
-                            <span className="eyebrow">{t('aiBreakdownTag')}</span>
-                            <h4>{entry.title}</h4>
+                      return (
+                        <motion.section 
+                          layout
+                          key={entry.key} 
+                          className="task-group"
+                        >
+                          <div className="task-group-head">
+                            <div>
+                              <span className="eyebrow secondary-label">{t('aiBreakdownTag')}</span>
+                              <h4 className="editorial-header" style={{ fontSize: '1.4rem' }}>{entry.title}</h4>
+                            </div>
                           </div>
-                          <Tag color="processing" variant="filled">
-                            {t('subtasksCount', { count: entry.todos.length })}
-                          </Tag>
-                        </div>
-                        <div className="task-group-list">
-                          {entry.todos.map((todo, todoIndex) =>
-                            renderTodoRow(todo, todoIndex)
-                          )}
-                        </div>
-                      </section>
-                    );
-                  })}
-                </div>
-              )}
+                          <div className="task-group-list">
+                            {entry.todos.map((todo, todoIndex) =>
+                              renderTodoRow(todo, todoIndex)
+                            )}
+                          </div>
+                        </motion.section>
+                      );
+                    })}
+                    <div className="pagination-wrapper">
+                      <Pagination
+                        current={currentPage}
+                        pageSize={pageSize}
+                        total={allTodoListEntries.length}
+                        onChange={(page) => setCurrentPage(page)}
+                        hideOnSinglePage
+                        showSizeChanger={false}
+                        className="custom-pagination"
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </Spin>
           </div>
         </section>
 
         <aside className="insight-column">
-          <section className="insight-card">
-            <div className="section-heading compact">
-              <div>
-                <h3>{t('overviewTitle')}</h3>
-                <p>{t('overviewDesc')}</p>
-              </div>
-            </div>
-
-            <div className="metric-stack">
-              <div className="metric-row">
-                <span>{t('dailyCompletion')}</span>
-                <strong>{focusScore}%</strong>
-              </div>
-              <Progress percent={focusScore} showInfo={false} strokeColor="#006592" railColor="#dde3eb" />
-              <div className="metric-grid">
-                <div>
-                  <strong>{totalCount}</strong>
-                  <span>{t('allTasks')}</span>
-                </div>
-                <div>
-                  <strong>{activeCount}</strong>
-                  <span>{t('inProgress')}</span>
-                </div>
-                <div>
-                  <strong>{completedCount}</strong>
-                  <span>{t('completed')}</span>
-                </div>
-                <div>
-                  <strong>{groupedEntries.length}</strong>
-                  <span>{t('aiGroups')}</span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="insight-card muted">
-            <div className="section-heading compact">
-              <div>
-                <h3>{t('nextHorizonTitle')}</h3>
-                <p>{t('nextHorizonDesc')}</p>
-              </div>
-            </div>
-            <div className="tomorrow-list">
-              {tomorrowPreview.length === 0 ? (
-                <p className="placeholder-copy">{t('placeholderPreview')}</p>
-              ) : (
-                tomorrowPreview.map((entry, index) => {
-                  const todo = entry.type === 'single' ? entry.todo : entry.todos[0];
-                  return (
-                    <div key={todo.id} className="tomorrow-item">
-                      <span className="tomorrow-dot" />
-                      <div>
-                        <p>{todo.displayText}</p>
-                        <span>{index === 0 ? (language === 'zh' ? '优先处理' : 'Top priority') : (language === 'zh' ? '后续衔接' : 'Next bridge')}</span>
+          <section className="dashboard-card bento-glow">
+            <Tabs 
+              defaultActiveKey="1"
+              items={[
+                {
+                  key: '1',
+                  label: t('overviewTitle'),
+                  children: (
+                    <div className="tab-pane">
+                      <div className="metric-stack">
+                        <div className="metric-row">
+                          <span>{t('dailyCompletion')}</span>
+                          <strong>{focusScore}%</strong>
+                        </div>
+                        <Progress percent={focusScore} showInfo={false} strokeColor="#006592" railColor="#dde3eb" />
+                        <div className="metric-grid">
+                          <div>
+                            <strong>{totalCount}</strong>
+                            <span>{t('allTasks')}</span>
+                          </div>
+                          <div>
+                            <strong>{activeCount}</strong>
+                            <span>{t('inProgress')}</span>
+                          </div>
+                          <div>
+                            <strong>{completedCount}</strong>
+                            <span>{t('completed')}</span>
+                          </div>
+                          <div>
+                            <strong>{groupedEntries.length}</strong>
+                            <span>{t('aiGroups')}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
-          </section>
-
-          <section className="wisdom-card">
-            <div className="wisdom-overlay" />
-            <div className="wisdom-content">
-              <FireOutlined />
-              <p>{t('wisdomQuote')}</p>
-              <span>Todo Vibe ritual</span>
-            </div>
-          </section>
-
-          <section className="mini-stats">
-            <div className="mini-stat-card">
-              <CheckCircleOutlined />
-              <strong>{completedCount}</strong>
-              <span>{t('doneToday')}</span>
-            </div>
-            <div className="mini-stat-card">
-              <ClockCircleOutlined />
-              <strong>{Math.max(1, Math.ceil(activeCount * 0.8))}h</strong>
-              <span>{t('focusEstimate')}</span>
-            </div>
+                  )
+                },
+                {
+                  key: '2',
+                  label: t('nextHorizonTitle'),
+                  children: (
+                    <div className="tab-pane">
+                      <p className="tab-desc">{t('nextHorizonDesc')}</p>
+                      <div className="tomorrow-list">
+                        {tomorrowPreview.length === 0 ? (
+                          <p className="placeholder-copy">{t('placeholderPreview')}</p>
+                        ) : (
+                          tomorrowPreview.map((entry, index) => {
+                            const todo = entry.type === 'single' ? entry.todo : entry.todos[0];
+                            return (
+                              <div key={todo.id} className="tomorrow-item">
+                                <span className="tomorrow-dot" />
+                                <div>
+                                  <p>{todo.displayText}</p>
+                                  <span>{index === 0 ? (language === 'zh' ? '优先处理' : 'Top priority') : (language === 'zh' ? '后续衔接' : 'Next bridge')}</span>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )
+                },
+                {
+                  key: '3',
+                  label: 'Ritual',
+                  children: (
+                    <div className="tab-pane">
+                      <div className="wisdom-mini">
+                         <FireOutlined />
+                         <p>{t('wisdomQuote')}</p>
+                      </div>
+                      <div className="mini-stats-row">
+                        <div className="mini-stat-item">
+                          <CheckCircleOutlined />
+                          <strong>{completedCount}</strong>
+                        </div>
+                        <div className="mini-stat-item">
+                          <ClockCircleOutlined />
+                          <strong>{Math.max(1, Math.ceil(activeCount * 0.8))}h</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+              ]}
+            />
           </section>
         </aside>
       </div>
 
-      <section className="mobile-cta">
-        <Button type="primary" size="large" icon={<ArrowRightOutlined />} onClick={() => inputRef.current?.focus()}>
-          {t('addNextThing')}
-        </Button>
-      </section>
     </section>
   );
 }

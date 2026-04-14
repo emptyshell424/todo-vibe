@@ -114,8 +114,8 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
       <div className="workspace-main">
         <header className="workspace-topbar">
           <div>
-            <p className="topbar-kicker">{t('personalSanctuary')}</p>
-            <h1 className="topbar-title">{t('topbarTitle')}</h1>
+            <p className="topbar-kicker secondary-label">{t('personalSanctuary')}</p>
+            <h1 className="topbar-title editorial-header">{t('topbarTitle')}</h1>
           </div>
 
           <div className="topbar-actions">
@@ -176,10 +176,37 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   return (
-    <App>
-      <Suspense fallback={<div className="workspace-shell"><div className="workspace-main"><p>{t('loadingWorkspace')}</p></div></div>}>
-        <SidebarAndMain>{children}</SidebarAndMain>
-      </Suspense>
-    </App>
+    <ConfigProvider
+      theme={{
+        token: {
+          colorPrimary: '#000000',
+          borderRadius: 24,
+          fontFamily: '"Playfair Display", serif',
+          colorBgContainer: '#ffffff',
+          colorBorderSecondary: '#f0f0f0',
+        },
+        components: {
+          Button: {
+            borderRadius: 999,
+            controlHeight: 40,
+            fontWeight: 600,
+          },
+          Input: {
+            borderRadius: 999,
+            controlHeight: 40,
+          },
+          Select: {
+            borderRadius: 999,
+            controlHeight: 40,
+          },
+        },
+      }}
+    >
+      <App>
+        <Suspense fallback={<div className="workspace-shell"><div className="workspace-main"><p>{t('loadingWorkspace')}</p></div></div>}>
+          <SidebarAndMain>{children}</SidebarAndMain>
+        </Suspense>
+      </App>
+    </ConfigProvider>
   );
 }

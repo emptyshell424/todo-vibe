@@ -65,7 +65,7 @@ function ScheduledContent() {
 
       if (error) {
         notification.error({
-          message: t('loadTasksFailed'),
+          title: t('loadTasksFailed'),
           description: error.message,
         });
       } else {
@@ -109,7 +109,7 @@ function ScheduledContent() {
       .eq('user_id', user.id);
 
     if (error) {
-      notification.error({ message: t('statusUpdateFailed'), description: error.message });
+      notification.error({ title: t('statusUpdateFailed'), description: error.message });
     } else {
       setTodos((prev) => prev.map(t => t.id === id ? { ...t, is_completed: true } : t));
       message.success(t('taskAdded')); // Reusing or should I add "task completed"? 
@@ -123,7 +123,7 @@ function ScheduledContent() {
     if (!user) return;
     const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', user.id);
     if (error) {
-      notification.error({ message: t('deleteFailed'), description: error.message });
+      notification.error({ title: t('deleteFailed'), description: error.message });
     } else {
       setTodos((prev) => prev.filter((t) => t.id !== id));
       message.success(t('deleteSuccess'));
@@ -134,7 +134,7 @@ function ScheduledContent() {
     if (!user) return;
     const { error } = await supabase.from('todos').update(updates).eq('id', id).eq('user_id', user.id);
     if (error) {
-      notification.error({ message: t('updateFailed'), description: error.message });
+      notification.error({ title: t('updateFailed'), description: error.message });
     } else {
       setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
     }

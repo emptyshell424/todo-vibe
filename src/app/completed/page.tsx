@@ -5,6 +5,7 @@ import {
   App,
   Button,
   Empty,
+  Pagination,
   Skeleton,
   Spin,
   Typography,
@@ -40,6 +41,8 @@ function CompletedContent() {
   const [loading, setLoading] = useState(true);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 12;
   
   const searchParams = useSearchParams();
   const searchQuery = searchParams.get('q') || '';
@@ -61,7 +64,7 @@ function CompletedContent() {
 
       if (error) {
         notification.error({
-          message: t('loadTasksFailed'),
+          title: t('loadTasksFailed'),
           description: error.message,
         });
       } else {
@@ -89,6 +92,15 @@ function CompletedContent() {
     return result;
   }, [todos, searchQuery]);
 
+  const paginatedTodos = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredTodos.slice(start, start + pageSize);
+  }, [filteredTodos, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
   const handleToggle = async (id: string) => {
     if (!user) return;
     const target = todos.find((t) => t.id === id);
@@ -104,7 +116,7 @@ function CompletedContent() {
       .eq('user_id', user.id);
 
     if (error) {
-      notification.error({ message: t('statusUpdateFailed'), description: error.message });
+      notification.error({ title: t('statusUpdateFailed'), description: error.message });
     } else {
       // Since this is the completed page, unmarking means it disappears
       setTodos((prev) => prev.filter((t) => t.id !== id));
@@ -128,7 +140,7 @@ function CompletedContent() {
         setDeletingIds((prev) => new Set(prev).add(id));
         const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', user.id);
         if (error) {
-          notification.error({ message: t('deleteFailed'), description: error.message });
+          notification.error({ title: t('deleteFailed'), description: error.message });
         } else {
           setTodos((prev) => prev.filter((t) => t.id !== id));
           message.success(t('deleteSuccess'));
@@ -146,7 +158,7 @@ function CompletedContent() {
     if (!user) return;
     const { error } = await supabase.from('todos').update(updates).eq('id', id).eq('user_id', user.id);
     if (error) {
-      notification.error({ message: t('updateFailed'), description: error.message });
+      notification.error({ title: t('updateFailed'), description: error.message });
     } else {
       setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
     }
@@ -167,7 +179,7 @@ function CompletedContent() {
           .eq('user_id', user?.id);
 
         if (error) {
-          notification.error({ message: t('operationFailed'), description: error.message });
+          notification.error({ title: t('operationFailed'), description: error.message });
         } else {
           setTodos([]);
           message.success(t('clearCompletedSuccess'));
@@ -228,7 +240,7 @@ function CompletedContent() {
             />
           ) : (
             <div className="task-list-stack">
-              {filteredTodos.map((todo, index) => (
+              {paginatedTodos.map((todo, index) => (
                 <TodoItem
                   key={todo.id}
                   item={parseTodo(todo)}
@@ -240,6 +252,17 @@ function CompletedContent() {
                   onUpdate={handleUpdate}
                 />
               ))}
+              <div className="pagination-wrapper">
+                <Pagination
+                  current={currentPage}
+                  pageSize={pageSize}
+                  total={filteredTodos.length}
+                  onChange={(page) => setCurrentPage(page)}
+                  hideOnSinglePage
+                  showSizeChanger={false}
+                  className="custom-pagination"
+                />
+              </div>
             </div>
           )}
         </Spin>

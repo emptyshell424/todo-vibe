@@ -59,7 +59,7 @@ function StatsContent() {
 
       if (error) {
         notification.error({
-          message: t('loadStatsFailed'),
+          title: t('loadStatsFailed'),
           description: error.message,
         });
       } else {

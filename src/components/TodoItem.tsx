@@ -1,8 +1,17 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Button, Checkbox, Input, type InputRef, Tag } from 'antd';
-import { CheckOutlined, CloseOutlined, CalendarOutlined, ClockCircleOutlined, DeleteOutlined, EditOutlined, RobotOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Input, type InputRef } from 'antd';
+import { 
+  CheckOutlined, 
+  CloseOutlined, 
+  ClockCircleOutlined, 
+  DeleteOutlined, 
+  EditOutlined, 
+  RobotOutlined,
+  MoreOutlined
+} from '@ant-design/icons';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useI18n } from './I18nProvider';
 
 export interface Todo {
@@ -88,94 +97,118 @@ export default function TodoItem({
     setIsEditing(false);
   };
 
-  const handleTogglePriority = async () => {
+  const handleTogglePriority = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     const nextPriority = item.priority === 'urgent' ? 'normal' : 'urgent';
     await onUpdate(item.id, { priority: nextPriority });
   };
 
   return (
-    <article className={`task-row${item.is_completed ? ' is-complete' : ''}${isEditing ? ' is-editing' : ''}`}>
+    <motion.article 
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+      className={`task-row${item.is_completed ? ' is-complete' : ''}${isEditing ? ' is-editing' : ''}`}
+    >
       <div className="task-row-main">
-        <Checkbox
-          checked={item.is_completed}
-          onChange={() => onToggle(item.id)}
-          disabled={togglingIds.has(item.id) || updating}
-        />
+        <div className="checkbox-wrapper">
+          <Checkbox
+            checked={item.is_completed}
+            onChange={() => onToggle(item.id)}
+            disabled={togglingIds.has(item.id) || updating}
+          />
+        </div>
+        
         <div className="task-row-copy">
-          {isEditing ? (
-            <Input
-              ref={editInputRef}
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              onPressEnter={handleSave}
-              onBlur={handleSave}
-              disabled={updating}
-              variant="borderless"
-              className="edit-input"
-            />
-          ) : (
-            <h4 onClick={() => !item.is_completed && setIsEditing(true)}>{item.displayText}</h4>
-          )}
+          <AnimatePresence mode="wait">
+            {isEditing ? (
+              <motion.div
+                key="editing"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <Input
+                  ref={editInputRef}
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  onPressEnter={handleSave}
+                  onBlur={handleSave}
+                  disabled={updating}
+                  variant="borderless"
+                  className="edit-input"
+                />
+              </motion.div>
+            ) : (
+              <motion.h4 
+                key="static"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                onClick={() => !item.is_completed && setIsEditing(true)}
+              >
+                {item.displayText}
+              </motion.h4>
+            )}
+          </AnimatePresence>
+
           <div className="task-row-meta">
-            <span>
-              <ClockCircleOutlined />
+            <span className="meta-time">
               {formatTimeLabel(item, index, language)}
             </span>
-            {item.groupTitle ? (
-              <span>
-                <RobotOutlined />
-                {item.groupTitle}
-              </span>
-            ) : item.due_date ? (
-              <span>
-                <CalendarOutlined />
-                {new Date(item.due_date).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US')}
-              </span>
-            ) : (
-              <span>
-                <CalendarOutlined />
-                {t('today')}
+            {item.groupTitle && (
+              <span className="meta-group">
+                <RobotOutlined size={10} /> {item.groupTitle}
               </span>
             )}
+            <span 
+              className={`meta-priority ${item.priority}`} 
+              onClick={handleTogglePriority}
+            >
+              {item.priority === 'urgent' ? t('highFocus') : t('steadyPace')}
+            </span>
           </div>
         </div>
       </div>
 
       <div className="task-row-actions">
-        {!isEditing && (
-          <>
-            <Tag
-              color={item.priority === 'urgent' ? 'error' : 'processing'}
-              variant="filled"
-              className="priority-tag"
-              onClick={handleTogglePriority}
-              style={{ cursor: 'pointer' }}
+        <AnimatePresence>
+          {!isEditing ? (
+            <motion.div 
+              className="action-group"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
             >
-              {item.priority === 'urgent' ? t('highFocus') : t('steadyPace')}
-            </Tag>
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => setIsEditing(true)}
-              disabled={updating || deletingIds.has(item.id)}
-            />
-            <Button
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              loading={deletingIds.has(item.id)}
-              disabled={deletingIds.has(item.id) || updating}
-              onClick={() => onDelete(item.id)}
-            />
-          </>
-        )}
-        {isEditing && (
-          <div className="edit-actions">
-            <Button type="text" icon={<CheckOutlined />} onClick={handleSave} loading={updating} />
-            <Button type="text" icon={<CloseOutlined />} onClick={handleCancel} disabled={updating} />
-          </div>
-        )}
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => setIsEditing(true)}
+                disabled={updating || deletingIds.has(item.id)}
+              />
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                loading={deletingIds.has(item.id)}
+                disabled={deletingIds.has(item.id) || updating}
+                onClick={() => onDelete(item.id)}
+              />
+            </motion.div>
+          ) : (
+            <motion.div 
+              className="edit-actions"
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+            >
+              <Button type="text" size="small" icon={<CheckOutlined />} onClick={handleSave} loading={updating} />
+              <Button type="text" size="small" icon={<CloseOutlined />} onClick={handleCancel} disabled={updating} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </article>
+    </motion.article>
   );
 }
