@@ -1,12 +1,110 @@
 'use client';
 
 import React from 'react';
-import { App, Button, ConfigProvider, Input, Modal, Select } from 'antd';
-import { GlobalOutlined, BarChartOutlined, CalendarOutlined, CheckCircleOutlined, NotificationOutlined, SearchOutlined, SettingOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { App, Button, ConfigProvider, Input, Modal, Select, Drawer } from 'antd';
+import { GlobalOutlined, BarChartOutlined, CalendarOutlined, CheckCircleOutlined, NotificationOutlined, SearchOutlined, SettingOutlined, UnorderedListOutlined, MenuOutlined } from '@ant-design/icons';
 import { Show, SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useI18n } from './I18nProvider';
+
+function SidebarContent({ navigationItems, pathname, router, t, setIsSettingsOpen, user, onNavigate }: any) {
+  return (
+    <>
+      <div className="brand-lockup desktop-only">
+        <div className="brand-mark">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="1.2"/>
+            <path d="M7 12.5L10.5 16L17 8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <div className="brand-info">
+          <h1 className="brand-name">Todo Vibe</h1>
+          <p className="brand-subtitle">{t('brandSubtitle')}</p>
+        </div>
+      </div>
+
+      <nav className="sidebar-nav">
+        {navigationItems.map((item: any) => {
+          const active = pathname === item.key;
+          const className = active ? 'sidebar-link active' : 'sidebar-link';
+          const isDisabled = (item as any).disabled;
+
+          if (isDisabled) {
+            return (
+              <button key={item.key} type="button" className={className} disabled>
+                <span className="sidebar-link-icon">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            );
+          }
+
+          return (
+            <button
+              key={item.key}
+              type="button"
+              className={className}
+              onClick={() => {
+                router.push(item.key);
+                onNavigate?.();
+              }}
+            >
+              <span className="sidebar-link-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="sidebar-footer">
+        <button 
+          type="button" 
+          className="sidebar-link" 
+          onClick={() => {
+            setIsSettingsOpen(true);
+            onNavigate?.();
+          }}
+        >
+          <span className="sidebar-link-icon">
+            <SettingOutlined />
+          </span>
+          <span>{t('settings')}</span>
+        </button>
+
+        <div className="focus-chip">
+          <div className="focus-chip-avatar">{user?.firstName?.slice(0, 1) ?? 'F'}</div>
+          <div>
+            <p className="focus-chip-title">{t('focusMode')}</p>
+            <p className="focus-chip-text">{t('focusModeDesc')}</p>
+          </div>
+        </div>
+
+        <Show
+          when="signed-out"
+          fallback={
+            <Button 
+              type="primary" 
+              size="large" 
+              className="sidebar-cta"
+              onClick={() => {
+                router.push('/?focus=true');
+                onNavigate?.();
+              }}
+            >
+              {t('newTask')}
+            </Button>
+          }
+        >
+          <SignInButton mode="modal">
+            <Button type="primary" size="large" className="sidebar-cta">
+              {t('signIn')}
+            </Button>
+          </SignInButton>
+        </Show>
+      </div>
+    </>
+  );
+}
 
 function SidebarAndMain({ children }: { children: React.ReactNode }) {
   const { t, language, setLanguage } = useI18n();
@@ -16,7 +114,8 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const { message } = App.useApp();
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
   const [aiBaseUrl, setAiBaseUrl] = useState('');
@@ -63,96 +162,63 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="workspace-shell">
-      <aside className="workspace-sidebar">
-        <div className="brand-lockup">
-          <div className="brand-mark">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="1.2"/>
-              <path d="M7 12.5L10.5 16L17 8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
-          <div className="brand-info">
-            <h1 className="brand-name">Todo Vibe</h1>
-            <p className="brand-subtitle">{t('brandSubtitle')}</p>
-          </div>
-        </div>
+      <aside className="workspace-sidebar desktop-only">
+        <SidebarContent 
+          navigationItems={navigationItems} 
+          pathname={pathname} 
+          router={router} 
+          t={t} 
+          setIsSettingsOpen={setIsSettingsOpen} 
+          user={user} 
+        />
+      </aside>
 
-        <nav className="sidebar-nav">
-          {navigationItems.map((item) => {
-            const active = pathname === item.key;
-            const className = active ? 'sidebar-link active' : 'sidebar-link';
-            const isDisabled = (item as any).disabled;
-
-            if (isDisabled) {
-              return (
-                <button key={item.key} type="button" className={className} disabled>
-                  <span className="sidebar-link-icon">{item.icon}</span>
-                  <span>{item.label}</span>
-                </button>
-              );
-            }
-
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className={className}
-                onClick={() => router.push(item.key)}
-              >
-                <span className="sidebar-link-icon">{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="sidebar-footer">
-          <button 
-            type="button" 
-            className="sidebar-link" 
-            onClick={() => setIsSettingsOpen(true)}
-          >
-            <span className="sidebar-link-icon">
-              <SettingOutlined />
-            </span>
-            <span>{t('settings')}</span>
-          </button>
-
-          <div className="focus-chip">
-            <div className="focus-chip-avatar">{user?.firstName?.slice(0, 1) ?? 'F'}</div>
-            <div>
-              <p className="focus-chip-title">{t('focusMode')}</p>
-              <p className="focus-chip-text">{t('focusModeDesc')}</p>
+      <Drawer
+        title={
+          <div className="brand-lockup">
+            <div className="brand-mark">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="1.2"/>
+                <path d="M7 12.5L10.5 16L17 8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div className="brand-info">
+              <h1 className="brand-name">Todo Vibe</h1>
             </div>
           </div>
-
-          <Show
-            when="signed-out"
-            fallback={
-              <Button 
-                type="primary" 
-                size="large" 
-                className="sidebar-cta"
-                onClick={() => router.push('/?focus=true')}
-              >
-                {t('newTask')}
-              </Button>
-            }
-          >
-            <SignInButton mode="modal">
-              <Button type="primary" size="large" className="sidebar-cta">
-                {t('signIn')}
-              </Button>
-            </SignInButton>
-          </Show>
-        </div>
-      </aside>
+        }
+        placement="left"
+        onClose={() => setIsMobileMenuOpen(false)}
+        open={isMobileMenuOpen}
+        width={280}
+        styles={{ body: { padding: '1.5rem' } }}
+        className="mobile-drawer"
+      >
+        <SidebarContent 
+          navigationItems={navigationItems} 
+          pathname={pathname} 
+          router={router} 
+          t={t} 
+          setIsSettingsOpen={setIsSettingsOpen} 
+          user={user} 
+          onNavigate={() => setIsMobileMenuOpen(false)}
+        />
+      </Drawer>
 
       <div className="workspace-main">
         <header className="workspace-topbar">
-          <div>
-            <p className="topbar-kicker secondary-label">{t('personalSanctuary')}</p>
-            <h1 className="topbar-title editorial-header">{t('topbarTitle')}</h1>
+          <div className="topbar-left">
+            <button 
+              type="button" 
+              className="topbar-icon-button mobile-only menu-trigger"
+              onClick={() => setIsMobileMenuOpen(true)}
+            >
+              <MenuOutlined />
+            </button>
+            <div className="topbar-heading">
+              <p className="topbar-kicker secondary-label">{t('personalSanctuary')}</p>
+              <h1 className="topbar-title editorial-header">{t('topbarTitle')}</h1>
+            </div>
           </div>
 
           <div className="topbar-actions">
