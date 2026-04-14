@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useI18n } from './I18nProvider';
+import { encodeAiBreakdownText, encodeNormalTodoText } from '@/lib/todoUtils';
 
 export interface Todo {
   id: string;
@@ -87,7 +88,14 @@ export default function TodoItem({
     }
 
     setUpdating(true);
-    await onUpdate(item.id, { text: trimmed });
+    let encodedText = trimmed;
+    if (item.groupTitle) {
+      encodedText = encodeAiBreakdownText(item.groupTitle, trimmed, item.due_date || undefined);
+    } else if (item.due_date) {
+      encodedText = encodeNormalTodoText(trimmed, item.due_date);
+    }
+
+    await onUpdate(item.id, { text: encodedText });
     setUpdating(false);
     setIsEditing(false);
   };

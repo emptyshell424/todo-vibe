@@ -39,8 +39,12 @@ body {
   min-height: 100%;
 }
 
-body {
+html {
   background-color: var(--surface);
+}
+
+body {
+  background-color: transparent;
   color: var(--text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -59,6 +63,39 @@ body::before {
   z-index: 0;
   pointer-events: none;
   background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><filter id="noiseFilter"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noiseFilter)"/></svg>');
+}
+
+/* Premium Animated Vibe Aura */
+body::after {
+  content: "";
+  position: fixed;
+  top: -10%;
+  left: -10%;
+  width: 120%;
+  height: 120%;
+  z-index: -1;
+  pointer-events: none;
+  background: 
+    radial-gradient(circle at 10% 20%, rgba(0, 101, 146, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(120, 198, 253, 0.06) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, rgba(120, 198, 253, 0.03) 0%, transparent 60%);
+  filter: blur(80px);
+  animation: bg-vortex 30s ease-in-out infinite alternate;
+}
+
+@keyframes bg-vortex {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate(-3%, 2%) scale(1.05) rotate(2deg);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate(3%, -2%) scale(1.1) rotate(-2deg);
+    opacity: 0.4;
+  }
 }
 
 button,
@@ -112,29 +149,38 @@ textarea {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 0.5rem;
-  background: var(--primary);
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--primary);
+  transition: transform 0.3s var(--transition-smooth);
+}
+
+.brand-mark:hover {
+  transform: rotate(15deg) scale(1.1);
+}
+
+.brand-info {
+  display: flex;
+  flex-direction: column;
 }
 
 .brand-name {
   margin: 0;
   color: var(--primary);
-  font-size: 1.15rem;
-  font-weight: 800;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .brand-subtitle {
-  margin: 0.1rem 0 0;
-  color: var(--text-muted);
-  font-size: 0.78rem;
+  margin: 0.2rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
 }
 
 .sidebar-nav,
@@ -234,8 +280,7 @@ textarea {
 }
 
 .workspace-topbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 20;
   display: flex;
   align-items: center;
@@ -387,9 +432,8 @@ textarea {
 }
 
 .composer-panel.floating {
-  position: sticky;
-  top: 1.5rem;
-  z-index: 50;
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -399,7 +443,7 @@ textarea {
   border: 1px solid var(--outline);
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.08);
   max-width: 800px;
-  margin: 0 auto 3rem;
+  margin: 1.5rem auto 3rem;
 }
 
 .composer-icon {
@@ -504,7 +548,7 @@ textarea {
 
 .insight-column {
   position: sticky;
-  top: 6rem;
+  top: 2rem;
   height: fit-content;
   display: flex;
   flex-direction: column;
@@ -955,6 +999,13 @@ textarea {
   border-radius: 999px;
   background: radial-gradient(circle, rgba(120, 198, 253, 0.6), rgba(120, 198, 253, 0));
   filter: blur(10px);
+  animation: orb-float 12s ease-in-out infinite alternate;
+}
+
+@keyframes orb-float {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.5; }
+  50% { transform: translate(-15px, 20px) scale(1.1); opacity: 0.7; }
+  100% { transform: translate(10px, -5px) scale(1.05); opacity: 0.5; }
 }
 
 .preview-card {

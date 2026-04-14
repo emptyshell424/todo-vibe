@@ -67,18 +67,6 @@ function isValidAiBreakdownTasks(value: unknown): value is AiBreakdownTask[] {
 
 // AI breakdown functions moved to todoUtils.ts
 
-function formatTimeLabel(todo: Todo, index: number) {
-  const createdAt = new Date(todo.created_at);
-  if (!Number.isNaN(createdAt.getTime())) {
-    return createdAt.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  const fallbackHour = 9 + (index % 7);
-  return `${String(fallbackHour).padStart(2, '0')}:00`;
-}
 
 export default function Home() {
   return (
@@ -106,7 +94,7 @@ function HomeContent() {
   const [newPriority, setNewPriority] = useState<'normal' | 'urgent'>('normal');
   const [scheduledDate, setScheduledDate] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5;
+  const pageSize = 10;
 
   useEffect(() => {
     setSearchQuery(searchParams.get('q') || '');
@@ -116,6 +104,12 @@ function HomeContent() {
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (searchParams.get('focus') === 'true') {
+      inputRef.current?.focus();
+    }
+  }, [searchParams]);
 
   const inputRef = useRef<InputRef>(null);
 
@@ -196,9 +190,18 @@ function HomeContent() {
   const totalCount = todos.length;
   const activeCount = totalCount - completedCount;
   const focusScore = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
-  const streakDays = Math.max(3, Math.min(21, activeCount + 5));
   const groupedEntries = allTodoListEntries.filter((entry) => entry.type === 'group');
-  const tomorrowPreview = allTodoListEntries.slice(0, 2);
+  const streakDays = Math.max(1, Math.floor(completedCount / 2) + 1);
+  
+  const tomorrowPreview = useMemo(() => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    
+    return todos
+      .map(parseTodo)
+      .filter(t => t.due_date && new Date(t.due_date) > today && !t.is_completed)
+      .slice(0, 3);
+  }, [todos]);
 
   useEffect(() => {
     const fetchTodos = async () => {
@@ -486,9 +489,11 @@ function HomeContent() {
                   {t('signInNow')}
                 </Button>
               </SignInButton>
-              <Button size="large" icon={<RobotOutlined />} disabled>
-                {t('aiBreakdownExample')}
-              </Button>
+              <SignInButton mode="modal">
+                <Button size="large" icon={<RobotOutlined />}>
+                  {t('aiBreakdownExample')}
+                </Button>
+              </SignInButton>
             </div>
           </div>
 
@@ -745,8 +750,7 @@ function HomeContent() {
                         {tomorrowPreview.length === 0 ? (
                           <p className="placeholder-copy">{t('placeholderPreview')}</p>
                         ) : (
-                          tomorrowPreview.map((entry, index) => {
-                            const todo = entry.type === 'single' ? entry.todo : entry.todos[0];
+                          tomorrowPreview.map((todo, index) => {
                             return (
                               <div key={todo.id} className="tomorrow-item">
                                 <span className="tomorrow-dot" />

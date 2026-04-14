@@ -14,6 +14,7 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useUser();
+  const { message } = App.useApp();
 
   const navigationItems = useMemo(() => [
     { key: '/', label: t('today'), icon: <CalendarOutlined /> },
@@ -42,9 +43,14 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
     <div className="workspace-shell">
       <aside className="workspace-sidebar">
         <div className="brand-lockup">
-          <div className="brand-mark">TV</div>
-          <div>
-            <p className="brand-name">Todo Vibe</p>
+          <div className="brand-mark">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="1.2"/>
+              <path d="M7 12.5L10.5 16L17 8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+          <div className="brand-info">
+            <h1 className="brand-name">Todo Vibe</h1>
             <p className="brand-subtitle">{t('brandSubtitle')}</p>
           </div>
         </div>
@@ -79,7 +85,11 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="sidebar-footer">
-          <button type="button" className="sidebar-link" disabled>
+          <button 
+            type="button" 
+            className="sidebar-link" 
+            onClick={() => message.info(language === 'zh' ? '设置功能即将上线' : 'Settings coming soon')}
+          >
             <span className="sidebar-link-icon">
               <SettingOutlined />
             </span>
@@ -97,7 +107,12 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
           <Show
             when="signed-out"
             fallback={
-              <Button type="primary" size="large" className="sidebar-cta">
+              <Button 
+                type="primary" 
+                size="large" 
+                className="sidebar-cta"
+                onClick={() => router.push('/?focus=true')}
+              >
                 {t('newTask')}
               </Button>
             }
@@ -128,6 +143,7 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
                 onPressEnter={() => handleSearch(searchValue)}
+                allowClear
               />
             </div>
             <button 
@@ -138,7 +154,12 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
             >
               <GlobalOutlined />
             </button>
-            <button type="button" className="topbar-icon-button" aria-label={t('notifications')}>
+            <button 
+              type="button" 
+              className="topbar-icon-button" 
+              aria-label={t('notifications')}
+              onClick={() => message.info(language === 'zh' ? '暂无新通知' : 'No new notifications')}
+            >
               <NotificationOutlined />
             </button>
             <div className="topbar-user">
