@@ -180,7 +180,13 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
               type="button" 
               className="topbar-icon-button" 
               aria-label={t('notifications')}
-              onClick={() => message.info(language === 'zh' ? '暂无新通知' : 'No new notifications')}
+              onClick={() => {
+                if (!user) {
+                  message.info(t('signInToViewNotifications'));
+                } else {
+                  message.info(t('noNotifications'));
+                }
+              }}
             >
               <NotificationOutlined />
             </button>

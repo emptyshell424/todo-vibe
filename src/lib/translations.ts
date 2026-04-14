@@ -19,6 +19,8 @@ export const translations = {
     topbarTitle: 'Plan your day with calm structure',
     searchPlaceholder: 'Search intentions...',
     notifications: 'Notifications',
+    noNotifications: 'No new notifications',
+    signInToViewNotifications: 'Please sign in to view notifications',
 
     // Home Page - Signed Out
     heroEyebrow: 'A calm planning ritual',
@@ -180,6 +182,8 @@ export const translations = {
     topbarTitle: '用宁静的结构规划你的一天',
     searchPlaceholder: '搜索意图...',
     notifications: '通知',
+    noNotifications: '暂无新通知',
+    signInToViewNotifications: '请先登录以查看通知',
 
     // Home Page - Signed Out
     heroEyebrow: '一种宁静的规划仪式',

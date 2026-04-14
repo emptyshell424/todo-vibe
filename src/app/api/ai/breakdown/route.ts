@@ -44,11 +44,35 @@ function cleanJsonResponse(text: string) {
 
   try {
     const parsed = JSON.parse(cleaned);
-    return Array.isArray(parsed) ? parsed : null;
+    // If it's already an array, return it
+    if (Array.isArray(parsed)) return parsed;
+    
+    // If it's an object, check if it contains a 'tasks' or similar array property
+    if (parsed && typeof parsed === 'object') {
+      const arrayProp = Object.values(parsed).find(val => Array.isArray(val));
+      if (arrayProp) return arrayProp as any[];
+      
+      // If no array property found but it's an object, maybe it's just one task?
+      // But we expect 4. Better return null to trigger re-extraction.
+    }
+    
+    return null;
   } catch {
     const start = cleaned.indexOf("[");
     const end = cleaned.lastIndexOf("]");
     if (start === -1 || end === -1 || end <= start) {
+      // Try to find the first object if no array is found
+      const objStart = cleaned.indexOf("{");
+      const objEnd = cleaned.lastIndexOf("}");
+      if (objStart !== -1 && objEnd !== -1 && objEnd > objStart) {
+        try {
+          const obj = JSON.parse(cleaned.slice(objStart, objEnd + 1));
+          const arrayProp = Object.values(obj).find(val => Array.isArray(val));
+          if (arrayProp) return arrayProp as any[];
+        } catch {
+          return null;
+        }
+      }
       return null;
     }
 
@@ -94,13 +118,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "请输入要拆解的目标" }, { status: 400 });
     }
 
-    // Strictly prioritize and ONLY use the client-provided API key for isolation
-    const activeApiKey = clientApiKey;
+    // Prioritize client-provided API key, fallback to server key if missing
+    const activeApiKey = clientApiKey || process.env.GEMINI_API_KEY;
 
     if (!activeApiKey) {
-      console.error("[AI Breakdown] Client API Key is missing");
+      console.error("[AI Breakdown] No API Key found in request or server environment");
       return NextResponse.json(
-        { error: "未检测到 API Key。为了保护隐私和资源隔离，请在“设置”中配置您自己的 API Key 以后使用此功能。" }, 
+        { error: "未检测到 API Key。如果您是访客，请在“设置”中配置您自己的 API Key；如果您是管理员，请检查 .env.local 配置。" }, 
         { status: 401 }
       );
     }
