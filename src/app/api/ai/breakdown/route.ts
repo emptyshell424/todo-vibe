@@ -16,7 +16,8 @@ try {
   console.error("[AI Breakdown] Failed to set global dispatcher:", e);
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+// We will initialize genAI inside the POST handler to use dynamic keys
+// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 const responseSchema: any = {
   description: "List of breakdown tasks",
@@ -84,70 +85,116 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
     const goal = typeof body?.goal === "string" ? body.goal.trim() : "";
+    const clientApiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    const provider = body?.provider || "gemini";
+    const baseUrl = body?.baseUrl?.trim();
+    const customModel = body?.model?.trim();
 
     if (!goal) {
       return NextResponse.json({ error: "请输入要拆解的目标" }, { status: 400 });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      console.error("[AI Breakdown] GEMINI_API_KEY is missing");
-      return NextResponse.json({ error: "服务端未配置 Gemini API Key" }, { status: 500 });
+    // Strictly prioritize and ONLY use the client-provided API key for isolation
+    const activeApiKey = clientApiKey;
+
+    if (!activeApiKey) {
+      console.error("[AI Breakdown] Client API Key is missing");
+      return NextResponse.json(
+        { error: "未检测到 API Key。为了保护隐私和资源隔离，请在“设置”中配置您自己的 API Key 以后使用此功能。" }, 
+        { status: 401 }
+      );
     }
 
-    const modelName = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
-    console.log(`[AI Breakdown] Using model: ${modelName}`);
+    let parsed: any = null;
 
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      systemInstruction:
-        "你是一名专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务，并严格输出 JSON 数组。",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema,
-      },
-    }, { apiVersion: 'v1beta' });
+    if (provider === "openai") {
+      const apiBase = baseUrl || "https://api.openai.com/v1";
+      const modelName = customModel || "gpt-3.5-turbo";
+      console.log(`[AI Breakdown] Using OpenAI format. Provider: ${apiBase}, Model: ${modelName}`);
 
-    const prompt = [
-      `用户目标：${goal}`,
-      "请输出 4 个任务。",
-      "每个任务都必须包含 title 和 priority。",
-      'priority 只能是 "high"、"medium"、"low" 之一。',
-      "不要输出 Markdown，不要输出额外解释。",
-    ].join("\n");
+      const response = await fetch(`${apiBase}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${activeApiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            { 
+              role: "system", 
+              content: "你是一名专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务。系统将解析你的输出为 JSON 数组。格式必须为：[{\"title\": \"任务1\", \"priority\": \"high\"}, ...]" 
+            },
+            { role: "user", content: `用户目标：${goal}` },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+        }),
+      });
 
-    let result;
-    let retryCount = 0;
-    const maxRetries = 1;
-
-    while (retryCount <= maxRetries) {
-      try {
-        console.log(`[AI Breakdown] Generating content (attempt ${retryCount + 1})...`);
-        result = await model.generateContent(prompt);
-        break;
-      } catch (err: any) {
-        console.error(`[AI Breakdown] Attempt ${retryCount + 1} failed:`, err);
-        const status = err?.status || err?.response?.status;
-        const message = err?.message || "";
-
-        if (retryCount < maxRetries && (status === 503 || message.includes('503'))) {
-          retryCount++;
-          console.log("[AI Breakdown] Retrying in 1s...");
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          continue;
-        }
-        throw err;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI API request failed: ${errorText}`);
       }
+
+      const data = await response.json();
+      const content = data.choices[0]?.message?.content;
+      parsed = cleanJsonResponse(content);
+    } else {
+      const genAI = new GoogleGenerativeAI(activeApiKey);
+      const modelName = customModel || (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
+      console.log(`[AI Breakdown] Using Gemini SDK. Model: ${modelName}`);
+
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction:
+          "你是一名专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务，并严格输出 JSON 数组。",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema,
+        },
+      }, { apiVersion: 'v1beta' });
+
+      const prompt = [
+        `用户目标：${goal}`,
+        "请输出 4 个任务。",
+        "每个任务都必须包含 title 和 priority。",
+        'priority 只能是 "high"、"medium"、"low" 之一。',
+        "不要输出 Markdown，不要输出额外解释。",
+      ].join("\n");
+
+      let result;
+      let retryCount = 0;
+      const maxRetries = 1;
+
+      while (retryCount <= maxRetries) {
+        try {
+          console.log(`[AI Breakdown] Generating content (attempt ${retryCount + 1})...`);
+          result = await model.generateContent(prompt);
+          break;
+        } catch (err: any) {
+          console.error(`[AI Breakdown] Attempt ${retryCount + 1} failed:`, err);
+          const status = err?.status || err?.response?.status;
+          const message = err?.message || "";
+
+          if (retryCount < maxRetries && (status === 503 || message.includes('503'))) {
+            retryCount++;
+            console.log("[AI Breakdown] Retrying in 1s...");
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (!result) throw new Error("AI generation failed or returned no result");
+
+      const response = await result.response;
+      parsed = cleanJsonResponse(response.text());
     }
-
-    if (!result) throw new Error("AI generation failed or returned no result");
-
-    const response = await result.response;
-    const text = response.text();
-    console.log("[AI Breakdown] Gemini raw response received");
-    const parsed = cleanJsonResponse(text);
 
     if (!isValidTaskArray(parsed)) {
-      console.error("[AI Breakdown] Invalid Gemini response payload:", text);
+      console.error("[AI Breakdown] Invalid AI response payload:", parsed);
       return NextResponse.json(
         { error: "AI 返回的数据格式不正确，请稍后重试" },
         { status: 502 }

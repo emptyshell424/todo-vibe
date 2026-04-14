@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { App, Button, ConfigProvider, Input } from 'antd';
+import { App, Button, ConfigProvider, Input, Modal, Select } from 'antd';
 import { GlobalOutlined, BarChartOutlined, CalendarOutlined, CheckCircleOutlined, NotificationOutlined, SearchOutlined, SettingOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { Show, SignInButton, UserButton, useUser } from '@clerk/nextjs';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -15,6 +15,28 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const { user } = useUser();
   const { message } = App.useApp();
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
+  const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [aiModel, setAiModel] = useState('');
+
+  useEffect(() => {
+    setApiKey(localStorage.getItem('gemini_api_key') || '');
+    setAiProvider((localStorage.getItem('ai_provider') as any) || 'gemini');
+    setAiBaseUrl(localStorage.getItem('ai_base_url') || '');
+    setAiModel(localStorage.getItem('ai_model') || '');
+  }, [isSettingsOpen]);
+
+  const handleSaveSettings = () => {
+    localStorage.setItem('gemini_api_key', apiKey.trim());
+    localStorage.setItem('ai_provider', aiProvider);
+    localStorage.setItem('ai_base_url', aiBaseUrl.trim());
+    localStorage.setItem('ai_model', aiModel.trim());
+    message.success(t('settingsSaved'));
+    setIsSettingsOpen(false);
+  };
 
   const navigationItems = useMemo(() => [
     { key: '/', label: t('today'), icon: <CalendarOutlined /> },
@@ -88,7 +110,7 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
           <button 
             type="button" 
             className="sidebar-link" 
-            onClick={() => message.info(language === 'zh' ? '设置功能即将上线' : 'Settings coming soon')}
+            onClick={() => setIsSettingsOpen(true)}
           >
             <span className="sidebar-link-icon">
               <SettingOutlined />
@@ -190,6 +212,97 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
 
         <main className="workspace-content">{children}</main>
       </div>
+
+      <Modal
+        title={t('settingsTitle')}
+        open={isSettingsOpen}
+        onCancel={() => setIsSettingsOpen(false)}
+        onOk={handleSaveSettings}
+        okText={t('saveSettings')}
+        cancelText={t('cancel')}
+        centered
+        width={450}
+        className="settings-modal"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', paddingTop: '12px' }}>
+          <div className="onboarding-tip" style={{ 
+            background: 'var(--color-bg-base)', 
+            padding: '12px', 
+            borderRadius: '12px',
+            fontSize: '13px',
+            border: '1px solid #eee'
+          }}>
+            <span>{t('aiOnboardingPrefix')}</span>
+            <a href="https://aihubmix.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#006592', fontWeight: 600 }}>
+              {t('aiOnboardingLink')}
+            </a>
+            <span>{t('aiOnboardingSuffix')}</span>
+          </div>
+
+          <div>
+            <p style={{ marginBottom: '8px', fontWeight: 600 }}>{t('aiProviderTitle')}</p>
+            <Select
+              style={{ width: '100%' }}
+              value={aiProvider}
+              onChange={(val) => setAiProvider(val)}
+              options={[
+                { value: 'gemini', label: t('aiProviderGemini') },
+                { value: 'openai', label: t('aiProviderOpenAI') },
+              ]}
+            />
+          </div>
+
+          <div>
+            <p style={{ marginBottom: '8px', fontWeight: 600 }}>{t('geminiApiKeyTitle')}</p>
+            <Input.Password
+              placeholder={t('geminiApiKeyPlaceholder')}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              variant="filled"
+            />
+          </div>
+
+          {aiProvider === 'openai' && (
+            <div>
+              <p style={{ marginBottom: '8px', fontWeight: 600 }}>{t('aiBaseUrlTitle')}</p>
+              <Input
+                placeholder={t('aiBaseUrlPlaceholder')}
+                value={aiBaseUrl}
+                onChange={(e) => setAiBaseUrl(e.target.value)}
+                variant="filled"
+              />
+            </div>
+          )}
+
+          <div>
+            <p style={{ marginBottom: '8px', fontWeight: 600 }}>{t('aiModelTitle')}</p>
+            <Input
+              placeholder={t('aiModelPlaceholder')}
+              value={aiModel}
+              onChange={(e) => setAiModel(e.target.value)}
+              variant="filled"
+            />
+            {aiProvider === 'gemini' && !aiModel && (
+              <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>Default: gemini-1.5-flash</p>
+            )}
+          </div>
+
+          <div style={{ 
+            marginTop: '8px',
+            padding: '12px', 
+            borderRadius: '12px', 
+            background: '#fffbe6', 
+            border: '1px solid #ffe58f',
+            fontSize: '12px',
+            color: '#856404'
+          }}>
+            <p style={{ fontWeight: 600, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '14px' }}>🛡️</span> {t('securityPrivacyTitle')}
+            </p>
+            <p style={{ margin: 0, lineHeight: '1.5' }}>{t('securityPrivacyNote')}</p>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

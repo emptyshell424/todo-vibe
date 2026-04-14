@@ -136,6 +136,31 @@ export const translations = {
     deleteSuccess: 'Task deleted',
     deleteFailed: 'Failed to delete task',
     loadTasksFailed: 'Failed to load tasks',
+    
+    // Settings
+    settingsTitle: 'Settings',
+    geminiApiKeyTitle: 'Gemini API Key',
+    geminiApiKeyDesc: 'To use the AI breakdown feature, please enter your Gemini API Key. Your key is stored locally in your browser.',
+    geminiApiKeyPlaceholder: 'Enter your API Key (AI breakdown)',
+    saveSettings: 'Save Settings',
+    settingsSaved: 'Settings saved successfully',
+    missingApiKey: 'Please configure your AI settings to use this feature.',
+    
+    // AI Settings Multi-Provider
+    aiProviderTitle: 'AI Provider',
+    aiProviderGemini: 'Google Gemini',
+    aiProviderOpenAI: 'OpenAI Compatible (DeepSeek, etc.)',
+    aiBaseUrlTitle: 'API Base URL',
+    aiBaseUrlPlaceholder: 'e.g., https://api.deepseek.com/v1',
+    aiModelTitle: 'Model Name',
+    aiModelPlaceholder: 'e.g., deepseek-chat or gpt-4o',
+    aiOnboardingPrefix: 'No API Key? ',
+    aiOnboardingLink: 'Get free credits at Aihubmix',
+    aiOnboardingSuffix: ' for quick start.',
+    
+    // Security & Privacy
+    securityPrivacyTitle: 'Security & Privacy',
+    securityPrivacyNote: 'Your API Key is stored only in your browser (LocalStorage). Our server acts as a pass-through proxy and never logs or saves your keys.',
   },
   zh: {
     // Sidebar & Navigation
@@ -272,5 +297,30 @@ export const translations = {
     deleteSuccess: '任务已删除',
     deleteFailed: '删除任务失败',
     loadTasksFailed: '加载任务失败',
+
+    // Settings
+    settingsTitle: '设置',
+    geminiApiKeyTitle: 'Gemini API Key',
+    geminiApiKeyDesc: '为了使用 AI 拆解功能，请输入你的 Gemini API Key。Key 仅保存在你的浏览器本地。',
+    geminiApiKeyPlaceholder: '请输入 API Key (用于 AI 拆解)',
+    saveSettings: '保存设置',
+    settingsSaved: '设置已成功保存',
+    missingApiKey: '请在“设置”中配置 AI 参数以使用此功能。',
+
+    // AI Settings Multi-Provider
+    aiProviderTitle: 'AI 供应商',
+    aiProviderGemini: 'Google Gemini',
+    aiProviderOpenAI: 'OpenAI 兼容接口 (DeepSeek 等)',
+    aiBaseUrlTitle: '接口地址 (Base URL)',
+    aiBaseUrlPlaceholder: '例如: https://api.deepseek.com/v1',
+    aiModelTitle: '模型名称 (Model)',
+    aiModelPlaceholder: '例如: deepseek-chat 或 gpt-4o',
+    aiOnboardingPrefix: '没有 API Key？',
+    aiOnboardingLink: '去 Aihubmix 注册',
+    aiOnboardingSuffix: ' 获取免费额度快速开始。',
+
+    // Security & Privacy
+    securityPrivacyTitle: '安全与隐私',
+    securityPrivacyNote: '您的 API Key 仅保存在浏览器本地 (LocalStorage)。服务器仅作为透明代理转发请求，绝不会记录或存储您的任何密钥信息。',
   },
 };

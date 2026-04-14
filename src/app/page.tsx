@@ -286,10 +286,25 @@ function HomeContent() {
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
+      const apiKey = localStorage.getItem('gemini_api_key') || '';
+      const provider = localStorage.getItem('ai_provider') || 'gemini';
+      const baseUrl = localStorage.getItem('ai_base_url') || '';
+      const model = localStorage.getItem('ai_model') || '';
+      
+      if (!apiKey) {
+        notification.error({
+          title: t('aiFailed'),
+          description: t('missingApiKey'),
+          placement: 'topRight',
+        });
+        setBreakingDown(false);
+        return;
+      }
+
       const resp = await fetch('/api/ai/breakdown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal }),
+        body: JSON.stringify({ goal, apiKey, provider, baseUrl, model }),
         signal: controller.signal,
       });
 
