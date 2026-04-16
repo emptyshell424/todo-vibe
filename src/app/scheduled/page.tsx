@@ -21,6 +21,7 @@ import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
 import { parseTodo } from '@/lib/todoUtils';
 import { useI18n } from '@/components/I18nProvider';
 import { motion } from 'framer-motion';
+import SignInPrompt from '@/components/SignInPrompt';
 
 const { Title, Text } = Typography;
 
@@ -167,12 +168,20 @@ function ScheduledContent() {
     }
   };
 
-  if (!isLoaded || !isSignedIn) {
+  if (!isLoaded) {
     return (
       <section className="workspace-home">
         <div className="loading-shell">
           <Skeleton active paragraph={{ rows: 8 }} />
         </div>
+      </section>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <section className="workspace-home">
+        <SignInPrompt />
       </section>
     );
   }

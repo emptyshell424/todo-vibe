@@ -20,6 +20,7 @@ import { supabase } from '@/lib/supabaseClient';
 import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
 import { parseTodo } from '@/lib/todoUtils';
 import { useI18n } from '@/components/I18nProvider';
+import SignInPrompt from '@/components/SignInPrompt';
 
 const { Title, Text } = Typography;
 
@@ -188,12 +189,20 @@ function CompletedContent() {
     });
   };
 
-  if (!isLoaded || !isSignedIn) {
+  if (!isLoaded) {
     return (
       <section className="workspace-home">
         <div className="loading-shell">
           <Skeleton active paragraph={{ rows: 8 }} />
         </div>
+      </section>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <section className="workspace-home">
+        <SignInPrompt />
       </section>
     );
   }

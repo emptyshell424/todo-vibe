@@ -37,6 +37,7 @@ import { supabase } from '@/lib/supabaseClient';
 import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
 import { useI18n } from '@/components/I18nProvider';
 import { motion, AnimatePresence } from 'framer-motion';
+import SignInPrompt from '@/components/SignInPrompt';
 
 const { Text, Title } = Typography;
 import { AI_BREAKDOWN_PREFIX, parseTodo, encodeAiBreakdownText, encodeNormalTodoText } from '@/lib/todoUtils';
@@ -64,9 +65,6 @@ function isValidAiBreakdownTasks(value: unknown): value is AiBreakdownTask[] {
     )
   );
 }
-
-// AI breakdown functions moved to todoUtils.ts
-
 
 export default function Home() {
   return (
@@ -149,7 +147,7 @@ function HomeContent() {
     }
 
     return result;
-  }, [todos, activeTab, searchQuery]);
+  }, [todos, activeTab, searchQuery, language]);
 
   const allTodoListEntries = useMemo<TodoListEntry[]>(() => {
     const parsedTodos = filteredTodos.map(parseTodo);
@@ -231,7 +229,7 @@ function HomeContent() {
     };
 
     fetchTodos();
-  }, [isSignedIn, notification, user]);
+  }, [isSignedIn, notification, user, t]);
 
   const handleAdd = async () => {
     const text = inputValue.trim();
@@ -493,48 +491,7 @@ function HomeContent() {
   if (!isSignedIn) {
     return (
       <section className="workspace-home">
-        <div className="signed-out-hero">
-          <div className="signed-out-copy">
-            <span className="eyebrow">{t('heroEyebrow')}</span>
-            <Title>{t('heroTitle')}</Title>
-            <Text>{t('heroDesc')}</Text>
-            <div className="signed-out-actions">
-              <SignInButton mode="modal">
-                <Button type="primary" size="large">
-                  {t('signInNow')}
-                </Button>
-              </SignInButton>
-              <SignInButton mode="modal">
-                <Button size="large" icon={<RobotOutlined />}>
-                  {t('aiBreakdownExample')}
-                </Button>
-              </SignInButton>
-            </div>
-          </div>
-
-          <div className="signed-out-preview">
-            <div className="preview-orb" />
-            <div className="preview-card">
-              <span className="eyebrow">Focus workflow</span>
-              <h3>{t('startWithGoal')}</h3>
-              <p>{t('startWithGoalDesc')}</p>
-              <div className="preview-list">
-                <div>
-                  <CheckCircleOutlined />
-                  <span>{t('saveAndSync')}</span>
-                </div>
-                <div>
-                  <RobotOutlined />
-                  <span>{t('oneClickBreakdown')}</span>
-                </div>
-                <div>
-                  <ThunderboltOutlined />
-                  <span>{t('allInOne')}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SignInPrompt />
       </section>
     );
   }
@@ -808,7 +765,6 @@ function HomeContent() {
           </section>
         </aside>
       </div>
-
     </section>
   );
 }

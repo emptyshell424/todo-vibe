@@ -24,6 +24,7 @@ import {
 import { useUser } from '@clerk/nextjs';
 import { supabase } from '@/lib/supabaseClient';
 import { useI18n } from '@/components/I18nProvider';
+import SignInPrompt from '@/components/SignInPrompt';
 
 const { Title, Text } = Typography;
 
@@ -88,12 +89,20 @@ function StatsContent() {
     return { total, completed, active, rate, urgent, normal, aiGroups };
   }, [todos]);
 
-  if (!isLoaded || !isSignedIn) {
+  if (!isLoaded) {
     return (
       <section className="workspace-home">
         <div className="loading-shell">
           <Skeleton active paragraph={{ rows: 8 }} />
         </div>
+      </section>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <section className="workspace-home">
+        <SignInPrompt />
       </section>
     );
   }
