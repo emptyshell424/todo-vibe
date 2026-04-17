@@ -10,9 +10,10 @@ import { useI18n } from './I18nProvider';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 
-function SidebarContent({ navigationItems, pathname, router, t, setIsSettingsOpen, user, onNavigate }: any) {
+function SidebarContent({ navigationItems, pathname, router, t, setIsSettingsOpen, user, onNavigate, isMobile }: any) {
   return (
     <>
+      {isMobile && <div className="mobile-drawer-handle" />}
       <div className="brand-lockup desktop-only">
         <div className="brand-mark">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -203,6 +204,7 @@ function SidebarAndMain({ children }: { children: React.ReactNode }) {
           setIsSettingsOpen={setIsSettingsOpen} 
           user={user} 
           onNavigate={() => setIsMobileMenuOpen(false)}
+          isMobile={true}
         />
       </Drawer>
 

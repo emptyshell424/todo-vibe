@@ -533,10 +533,30 @@ function HomeContent() {
 
       <motion.section 
         className="composer-panel floating"
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.3 }}
+        initial={{ y: 30, opacity: 0, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        transition={{ 
+          type: 'spring',
+          stiffness: 260,
+          damping: 20,
+          delay: 0.2
+        }}
+        whileHover={{ scale: 1.005 }}
       >
+        <AnimatePresence>
+          {breakingDown && (
+            <motion.div 
+              className="ai-progress-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="ai-progress-shimmer" />
+              <div className="ai-progress-pulse" />
+              <span className="ai-progress-label">{t('aiThinking')}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="composer-icon">
           <ThunderboltOutlined />
         </div>
@@ -559,17 +579,20 @@ function HomeContent() {
             loading={breakingDown}
             disabled={adding || breakingDown}
             title={t('aiBreakdown')}
+            className="composer-ai-btn"
           />
-          <Button
-            type="primary"
-            size="large"
-            icon={<PlusOutlined />}
-            onClick={handleAdd}
-            loading={adding}
-            disabled={breakingDown}
-          >
-            {t('addTask')}
-          </Button>
+          <motion.div whileTap={{ scale: 0.96 }} transition={{ type: 'spring', stiffness: 400, damping: 10 }}>
+            <Button
+              type="primary"
+              size="large"
+              icon={<PlusOutlined />}
+              onClick={handleAdd}
+              loading={adding}
+              disabled={breakingDown}
+            >
+              {t('addTask')}
+            </Button>
+          </motion.div>
         </div>
       </motion.section>
 

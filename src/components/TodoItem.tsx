@@ -114,20 +114,30 @@ export default function TodoItem({
   return (
     <motion.article 
       layout
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+      whileHover={{ y: -2 }}
+      transition={{ 
+        type: 'spring',
+        stiffness: 400,
+        damping: 30,
+        mass: 0.8
+      }}
       className={`task-row${item.is_completed ? ' is-complete' : ''}${isEditing ? ' is-editing' : ''}`}
     >
       <div className="task-row-main">
-        <div className="checkbox-wrapper">
+        <motion.div 
+          className="checkbox-wrapper"
+          whileTap={{ scale: 0.8 }}
+          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+        >
           <Checkbox
             checked={item.is_completed}
             onChange={() => onToggle(item.id)}
             disabled={togglingIds.has(item.id) || updating}
           />
-        </div>
+        </motion.div>
         
         <div className="task-row-copy">
           <AnimatePresence mode="wait">
@@ -152,9 +162,11 @@ export default function TodoItem({
             ) : (
               <motion.h4 
                 key="static"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                 onClick={() => !item.is_completed && setIsEditing(true)}
+                style={{ cursor: item.is_completed ? 'default' : 'text' }}
               >
                 {item.displayText}
               </motion.h4>
@@ -170,12 +182,15 @@ export default function TodoItem({
                 <RobotOutlined size={10} /> {item.groupTitle}
               </span>
             )}
-            <span 
+            <motion.span 
               className={`meta-priority ${item.priority}`} 
               onClick={handleTogglePriority}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 17 }}
             >
               {item.priority === 'urgent' ? t('highFocus') : t('steadyPace')}
-            </span>
+            </motion.span>
           </div>
         </div>
       </div>
