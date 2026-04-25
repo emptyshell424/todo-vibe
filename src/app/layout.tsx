@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { ClerkProvider } from "@clerk/nextjs";
 import AppLayout from "@/components/AppLayout";
+import ClientErrorBoundary from "@/components/ClientErrorBoundary";
+import ClientErrorDiagnostics from "@/components/ClientErrorDiagnostics";
 import { I18nProvider } from "@/components/I18nProvider";
 import "./globals.css";
 
@@ -17,11 +19,14 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider afterSignOutUrl="/">
-      <html lang="zh-CN">
+      <html lang="zh-CN" suppressHydrationWarning>
         <body suppressHydrationWarning>
           <AntdRegistry>
             <I18nProvider>
-              <AppLayout>{children}</AppLayout>
+              <ClientErrorDiagnostics />
+              <ClientErrorBoundary>
+                <AppLayout>{children}</AppLayout>
+              </ClientErrorBoundary>
             </I18nProvider>
           </AntdRegistry>
         </body>

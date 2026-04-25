@@ -2,10 +2,9 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { App, Button, Empty, Pagination, Skeleton, Spin } from 'antd';
-import { CalendarOutlined } from '@ant-design/icons';
+import { InboxOutlined } from '@ant-design/icons';
 import { useAuth, useUser } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { motion } from 'framer-motion';
 import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import TodoItem, { type DisplayTask, type Task } from '@/components/TodoItem';
 import { useI18n } from '@/components/I18nProvider';
@@ -16,10 +15,8 @@ import {
   coerceProjectRows,
   coerceSectionRows,
   filterTasksByScope,
-  formatDateGroupLabel,
-  getDateGroupKey,
-  type Label,
   type Project,
+  type Label,
   type Recurrence,
   type RecurrenceRule,
   type Reminder,
@@ -29,16 +26,16 @@ import {
 import { createTask, deleteTasks, listTasks, toggleTaskComplete, updateTask } from '@/lib/taskRepository';
 import { advanceRecurringTask, listTaskMetadata, setTaskLabels, upsertRecurrence, upsertReminder } from '@/lib/taskMetadataRepository';
 
-export default function ScheduledPage() {
+export default function InboxPage() {
   return (
     <Suspense fallback={<div className="workspace-home"><Skeleton active paragraph={{ rows: 10 }} /></div>}>
-      <ScheduledContent />
+      <InboxContent />
     </Suspense>
   );
 }
 
-function ScheduledContent() {
-  const { t, language } = useI18n();
+function InboxContent() {
+  const { t } = useI18n();
   const { isLoaded, isSignedIn, user } = useUser();
   const { getToken } = useAuth();
   const supabase = useMemo(() => createClerkSupabaseClient(getToken), [getToken]);
@@ -46,7 +43,6 @@ function ScheduledContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchQuery = searchParams.get('q')?.trim() ?? '';
-
   const [tasks, setTasks] = useState<DisplayTask[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -57,11 +53,8 @@ function ScheduledContent() {
   const [loading, setLoading] = useState(true);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
-  const [pages, setPages] = useState<Record<string, number>>({});
-  const pageSize = 15;
-
-  const pageKey = searchQuery || 'all';
-  const currentPage = pages[pageKey] ?? 1;
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 12;
 
   useEffect(() => {
     const fetchTasks = async () => {
@@ -73,21 +66,14 @@ function ScheduledContent() {
 
       setLoading(true);
       const [{ data, error }, { data: projectData }, { data: sectionData }, metadata] = await Promise.all([
-        listTasks(supabase, {
-          userId: user.id,
-          scope: 'scheduled',
-          searchQuery,
-        }),
+        listTasks(supabase, { userId: user.id, scope: 'inbox', searchQuery }),
         supabase.from('projects').select(PROJECT_SELECT).eq('user_id', user.id).eq('is_archived', false),
         supabase.from('sections').select(SECTION_SELECT).eq('user_id', user.id),
         listTaskMetadata(supabase, user.id),
       ]);
 
       if (error) {
-        notification.error({
-          title: t('loadTasksFailed'),
-          description: error.message,
-        });
+        notification.error({ title: t('loadTasksFailed'), description: error.message });
       } else {
         setTasks(data);
       }
@@ -105,35 +91,14 @@ function ScheduledContent() {
   }, [isLoaded, isSignedIn, notification, searchQuery, supabase, t, user]);
 
   const filteredTasks = useMemo(
-    () => filterTasksByScope(tasks, { searchQuery }),
+    () => filterTasksByScope(tasks, { searchQuery, inboxOnly: true }),
     [searchQuery, tasks]
   );
 
-  const groupedTasks = useMemo(() => {
-    const groups = new Map<string, DisplayTask[]>();
-
-    for (const task of filteredTasks) {
-      if (!task.due_at) {
-        continue;
-      }
-
-      const dateKey = getDateGroupKey(task.due_at);
-      const existing = groups.get(dateKey) ?? [];
-      existing.push(task);
-      groups.set(dateKey, existing);
-    }
-
-    return Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right));
-  }, [filteredTasks]);
-
-  const paginatedGroups = useMemo(() => {
+  const paginatedTasks = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return groupedTasks.slice(start, start + pageSize);
-  }, [currentPage, groupedTasks]);
-
-  const setCurrentPage = (page: number) => {
-    setPages((prev) => ({ ...prev, [pageKey]: page }));
-  };
+    return filteredTasks.slice(start, start + pageSize);
+  }, [currentPage, filteredTasks]);
 
   const handleToggle = async (id: string) => {
     if (!user) {
@@ -195,7 +160,6 @@ function ScheduledContent() {
     }
 
     setDeletingIds((prev) => new Set(prev).add(id));
-
     const { error } = await deleteTasks(supabase, user.id, [id]);
 
     if (error) {
@@ -306,23 +270,23 @@ function ScheduledContent() {
   return (
     <section className="workspace-home">
       <section className="hero-strip">
-        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }}>
-          <span className="eyebrow secondary-label">{t('scheduledTitle')}</span>
-          <h2 className="editorial-header">{t('timeRhythm')}</h2>
-          <p>{t('scheduledHeroDesc')}</p>
-        </motion.div>
+        <div>
+          <span className="eyebrow secondary-label">{t('inbox')}</span>
+          <h2 className="editorial-header">{t('inboxTitle')}</h2>
+          <p>{t('inboxHeroDesc')}</p>
+        </div>
         <div className="hero-stats">
           <div className="hero-stat-card bento-small">
             <strong className="editorial-header">{filteredTasks.length}</strong>
-            <span className="secondary-label">{t('pending')}</span>
+            <span className="secondary-label">{t('unprocessed')}</span>
           </div>
         </div>
       </section>
 
       <div className="section-heading">
         <div>
-          <h3 className="editorial-header">{t('upcoming')}</h3>
-          <p>{searchQuery ? t('searchResultsFor', { query: searchQuery }) : t('allTasks')}</p>
+          <h3 className="editorial-header">{t('inbox')}</h3>
+          <p>{searchQuery ? t('searchResultsFor', { query: searchQuery }) : t('inboxTasksDesc')}</p>
         </div>
       </div>
 
@@ -330,55 +294,39 @@ function ScheduledContent() {
         <Spin spinning={loading}>
           {loading ? (
             <Skeleton active paragraph={{ rows: 6 }} />
-          ) : groupedTasks.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('noScheduledTasks')}>
-              <Button type="primary" onClick={() => router.push('/?focus=true')}>
+          ) : filteredTasks.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('noInboxTasks')}>
+              <Button type="primary" icon={<InboxOutlined />} onClick={() => router.push('/?focus=true')}>
                 {t('addTask')}
               </Button>
             </Empty>
           ) : (
             <div className="task-list-stack">
-              {paginatedGroups.map(([dateKey, items]) => (
-                <div key={dateKey} className="task-group">
-                  <div className="task-group-head">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <CalendarOutlined style={{ color: 'var(--text-muted)' }} />
-                      <h4 className="editorial-header" style={{ fontSize: '1.2rem', margin: 0 }}>
-                        {formatDateGroupLabel(dateKey, language)}
-                      </h4>
-                    </div>
-                    <span className="secondary-label">{t('taskCount', { count: items.length })}</span>
-                  </div>
-                  <div className="task-group-list">
-                    {items.map((task) => (
-                      <TodoItem
-                        key={`${task.id}:${task.updated_at}`}
-                        item={task}
-                        togglingIds={togglingIds}
-                        deletingIds={deletingIds}
-                        onToggle={handleToggle}
-                        onDelete={handleDelete}
-                        onUpdate={handleUpdate}
-                        onCreateSubtask={handleCreateSubtask}
-                        onUpdateMetadata={handleUpdateMetadata}
-                        projects={projects}
-                        sections={sections}
-                        parentCandidates={tasks}
-                        labels={labels}
-                        taskLabelIds={taskLabels.filter((label) => label.task_id === task.id).map((label) => label.label_id)}
-                        reminder={reminders.find((reminder) => reminder.task_id === task.id) ?? null}
-                        recurrence={recurrences.find((recurrence) => recurrence.task_id === task.id) ?? null}
-                      />
-                    ))}
-                  </div>
-                </div>
+              {paginatedTasks.map((task) => (
+                <TodoItem
+                  key={`${task.id}:${task.updated_at}`}
+                  item={task}
+                  togglingIds={togglingIds}
+                  deletingIds={deletingIds}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onUpdate={handleUpdate}
+                  onCreateSubtask={handleCreateSubtask}
+                  onUpdateMetadata={handleUpdateMetadata}
+                  projects={projects}
+                  sections={sections}
+                  parentCandidates={tasks}
+                  labels={labels}
+                  taskLabelIds={taskLabels.filter((label) => label.task_id === task.id).map((label) => label.label_id)}
+                  reminder={reminders.find((reminder) => reminder.task_id === task.id) ?? null}
+                  recurrence={recurrences.find((recurrence) => recurrence.task_id === task.id) ?? null}
+                />
               ))}
-
               <div className="pagination-wrapper">
                 <Pagination
                   current={currentPage}
                   pageSize={pageSize}
-                  total={groupedTasks.length}
+                  total={filteredTasks.length}
                   onChange={setCurrentPage}
                   hideOnSinglePage
                   showSizeChanger={false}

@@ -1,14 +1,27 @@
-import { type Todo, type ParsedTodo } from '@/components/TodoItem';
+export interface LegacyTodo {
+  id: string;
+  text: string;
+  is_completed: boolean;
+  priority: string;
+  user_id: string;
+  created_at: string;
+}
+
+export type ParsedTodo = LegacyTodo & {
+  displayText: string;
+  groupTitle: string | null;
+  due_date: string | null;
+};
 
 export const AI_BREAKDOWN_PREFIX = '[[AI_BREAKDOWN]]';
 
 export interface TodoMetadata {
   goal?: string;
   title?: string;
-  due_date?: string; // ISO string
+  due_date?: string;
 }
 
-export function parseTodo(todo: Todo): ParsedTodo {
+export function parseTodo(todo: LegacyTodo): ParsedTodo {
   if (!todo.text.startsWith(AI_BREAKDOWN_PREFIX)) {
     return {
       ...todo,
@@ -56,7 +69,10 @@ export function encodeAiBreakdownText(goal: string, title: string, dueDate?: str
 }
 
 export function encodeNormalTodoText(title: string, dueDate?: string) {
-  if (!dueDate) return title;
+  if (!dueDate) {
+    return title;
+  }
+
   const metadata: TodoMetadata = {
     title: title.trim(),
     due_date: dueDate,

@@ -1,157 +1,187 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { NextResponse } from "next/server";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { GoogleGenerativeAI, SchemaType, type Schema } from '@google/generative-ai';
+import { NextResponse } from 'next/server';
+import { ProxyAgent, setGlobalDispatcher } from 'undici';
 
-// Proxy configuration
-const proxyUrl = (
-  process.env.HTTPS_PROXY ||
-  process.env.HTTP_PROXY ||
-  "http://127.0.0.1:7897"
-).trim();
+type BreakdownTask = {
+  title: string;
+  priority: 'high' | 'medium' | 'low';
+};
 
-try {
-  console.log(`[AI Breakdown] Configuring proxy: ${proxyUrl}`);
-  setGlobalDispatcher(new ProxyAgent(proxyUrl));
-} catch (e) {
-  console.error("[AI Breakdown] Failed to set global dispatcher:", e);
+type OpenAIChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+};
+
+type ErrorWithStatus = {
+  status?: number;
+  response?: {
+    status?: number;
+  };
+  message?: string;
+};
+
+const proxyUrl = (process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '').trim();
+
+if (proxyUrl) {
+  try {
+    console.log(`[AI Breakdown] Configuring proxy: ${proxyUrl}`);
+    setGlobalDispatcher(new ProxyAgent(proxyUrl));
+  } catch (error) {
+    console.error('[AI Breakdown] Failed to set global dispatcher:', error);
+  }
 }
 
-// We will initialize genAI inside the POST handler to use dynamic keys
-// const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
-const responseSchema: any = {
-  description: "List of breakdown tasks",
+const responseSchema: Schema = {
+  description: 'List of breakdown tasks',
   type: SchemaType.ARRAY,
   items: {
     type: SchemaType.OBJECT,
     properties: {
       title: {
         type: SchemaType.STRING,
-        description: "A concrete and actionable task title",
+        description: 'A concrete and actionable task title',
       },
       priority: {
         type: SchemaType.STRING,
-        description: "Task priority",
-        enum: ["high", "medium", "low"],
+        format: 'enum',
+        description: 'Task priority',
+        enum: ['high', 'medium', 'low'],
       },
     },
-    required: ["title", "priority"],
+    required: ['title', 'priority'],
   },
-};
+} as const;
 
-function cleanJsonResponse(text: string) {
-  const cleaned = text.replace(/```json|```/gi, "").trim();
+function jsonError(status: number, code: string, message: string) {
+  return NextResponse.json({ code, message }, { status });
+}
+
+function getErrorStatus(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  const candidate = error as ErrorWithStatus;
+  return candidate.status || candidate.response?.status;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && typeof (error as ErrorWithStatus).message === 'string') {
+    return (error as ErrorWithStatus).message ?? '';
+  }
+
+  return '';
+}
+
+function extractArrayFromObject(value: unknown) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  return Object.values(value as Record<string, unknown>).find((item) => Array.isArray(item)) ?? null;
+}
+
+function cleanJsonResponse(text: string): unknown {
+  const cleaned = text.replace(/```json|```/gi, '').trim();
 
   try {
     const parsed = JSON.parse(cleaned);
-    // If it's already an array, return it
-    if (Array.isArray(parsed)) return parsed;
-    
-    // If it's an object, check if it contains a 'tasks' or similar array property
-    if (parsed && typeof parsed === 'object') {
-      const arrayProp = Object.values(parsed).find(val => Array.isArray(val));
-      if (arrayProp) return arrayProp as any[];
-      
-      // If no array property found but it's an object, maybe it's just one task?
-      // But we expect 4. Better return null to trigger re-extraction.
-    }
-    
-    return null;
+    return Array.isArray(parsed) ? parsed : extractArrayFromObject(parsed);
   } catch {
-    const start = cleaned.indexOf("[");
-    const end = cleaned.lastIndexOf("]");
-    if (start === -1 || end === -1 || end <= start) {
-      // Try to find the first object if no array is found
-      const objStart = cleaned.indexOf("{");
-      const objEnd = cleaned.lastIndexOf("}");
-      if (objStart !== -1 && objEnd !== -1 && objEnd > objStart) {
-        try {
-          const obj = JSON.parse(cleaned.slice(objStart, objEnd + 1));
-          const arrayProp = Object.values(obj).find(val => Array.isArray(val));
-          if (arrayProp) return arrayProp as any[];
-        } catch {
-          return null;
-        }
+    const start = cleaned.indexOf('[');
+    const end = cleaned.lastIndexOf(']');
+
+    if (start !== -1 && end !== -1 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        return null;
       }
+    }
+
+    const objectStart = cleaned.indexOf('{');
+    const objectEnd = cleaned.lastIndexOf('}');
+    if (objectStart === -1 || objectEnd === -1 || objectEnd <= objectStart) {
       return null;
     }
 
     try {
-      return JSON.parse(cleaned.slice(start, end + 1));
+      const parsed = JSON.parse(cleaned.slice(objectStart, objectEnd + 1));
+      return extractArrayFromObject(parsed);
     } catch {
       return null;
     }
   }
 }
 
-type BreakdownTask = {
-  title: string;
-  priority: "high" | "medium" | "low";
-};
-
 function isValidTaskArray(value: unknown): value is BreakdownTask[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every(
-      (item) =>
-        !!item &&
-        typeof item === "object" &&
-        typeof (item as BreakdownTask).title === "string" &&
-        (item as BreakdownTask).title.trim().length > 0 &&
-        ["high", "medium", "low"].includes((item as BreakdownTask).priority)
-    )
+    value.every((item) => {
+      if (!item || typeof item !== 'object') {
+        return false;
+      }
+
+      const candidate = item as BreakdownTask;
+      return (
+        typeof candidate.title === 'string' &&
+        candidate.title.trim().length > 0 &&
+        ['high', 'medium', 'low'].includes(candidate.priority)
+      );
+    })
   );
 }
 
 export async function POST(req: Request) {
-  console.log("[AI Breakdown] Received request");
   try {
-    const body = await req.json().catch(() => null);
-    const goal = typeof body?.goal === "string" ? body.goal.trim() : "";
-    const clientApiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
-    const provider = body?.provider || "gemini";
-    const baseUrl = body?.baseUrl?.trim();
-    const customModel = body?.model?.trim();
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    const goal = typeof body?.goal === 'string' ? body.goal.trim() : '';
+    const clientApiKey = typeof body?.apiKey === 'string' ? body.apiKey.trim() : '';
+    const provider = body?.provider === 'openai' ? 'openai' : 'gemini';
+    const baseUrl = typeof body?.baseUrl === 'string' ? body.baseUrl.trim() : '';
+    const customModel = typeof body?.model === 'string' ? body.model.trim() : '';
 
     if (!goal) {
-      return NextResponse.json({ error: "请输入要拆解的目标" }, { status: 400 });
+      return jsonError(400, 'invalid_goal', '请输入要拆解的目标。');
     }
 
-    // Prioritize client-provided API key, fallback to server key if missing
     const activeApiKey = clientApiKey || process.env.GEMINI_API_KEY;
 
     if (!activeApiKey) {
-      console.error("[AI Breakdown] No API Key found in request or server environment");
-      return NextResponse.json(
-        { error: "未检测到 API Key。如果您是访客，请在“设置”中配置您自己的 API Key；如果您是管理员，请检查 .env.local 配置。" }, 
-        { status: 401 }
-      );
+      return jsonError(401, 'missing_api_key', '未检测到 API Key。请先在设置中配置 API Key。');
     }
 
-    let parsed: any = null;
+    let parsed: unknown = null;
 
-    if (provider === "openai") {
-      const apiBase = baseUrl || "https://api.openai.com/v1";
-      const modelName = customModel || "gpt-3.5-turbo";
-      console.log(`[AI Breakdown] Using OpenAI format. Provider: ${apiBase}, Model: ${modelName}`);
+    if (provider === 'openai') {
+      const apiBase = baseUrl || 'https://api.openai.com/v1';
+      const modelName = customModel || 'gpt-4o-mini';
 
       const response = await fetch(`${apiBase}/chat/completions`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${activeApiKey}`,
         },
         body: JSON.stringify({
           model: modelName,
           messages: [
-            { 
-              role: "system", 
-              content: "你是一名专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务。系统将解析你的输出为 JSON 数组。格式必须为：[{\"title\": \"任务1\", \"priority\": \"high\"}, ...]" 
+            {
+              role: 'system',
+              content:
+                '你是专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务。输出必须是 JSON 数组，例如：[{"title":"任务1","priority":"high"}]。',
             },
-            { role: "user", content: `用户目标：${goal}` },
+            { role: 'user', content: `用户目标：${goal}` },
           ],
-          response_format: { type: "json_object" },
+          response_format: { type: 'json_object' },
           temperature: 0.7,
         }),
       });
@@ -161,121 +191,72 @@ export async function POST(req: Request) {
         throw new Error(`OpenAI API request failed: ${errorText}`);
       }
 
-      const data = await response.json();
-      const content = data.choices[0]?.message?.content;
-      parsed = cleanJsonResponse(content);
+      const data = (await response.json()) as OpenAIChatResponse;
+      parsed = cleanJsonResponse(data.choices?.[0]?.message?.content ?? '');
     } else {
       const genAI = new GoogleGenerativeAI(activeApiKey);
-      const modelName = customModel || (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
-      console.log(`[AI Breakdown] Using Gemini SDK. Model: ${modelName}`);
-
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction:
-          "你是一名专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务，并严格输出 JSON 数组。",
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema,
+      const modelName = customModel || (process.env.GEMINI_MODEL || 'gemini-1.5-flash').trim();
+      const model = genAI.getGenerativeModel(
+        {
+          model: modelName,
+          systemInstruction:
+            '你是专业的任务拆解助手。请把用户的大目标拆解为 4 个具体、清晰、可立即执行的小任务，并严格输出 JSON 数组。',
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
         },
-      }, { apiVersion: 'v1beta' });
+        { apiVersion: 'v1beta' }
+      );
 
       const prompt = [
         `用户目标：${goal}`,
-        "请输出 4 个任务。",
-        "每个任务都必须包含 title 和 priority。",
+        '请输出 4 个任务。',
+        '每个任务都必须包含 title 和 priority。',
         'priority 只能是 "high"、"medium"、"low" 之一。',
-        "不要输出 Markdown，不要输出额外解释。",
-      ].join("\n");
+        '不要输出 Markdown，不要输出额外解释。',
+      ].join('\n');
 
-      let result;
-      let retryCount = 0;
-      const maxRetries = 1;
-
-      while (retryCount <= maxRetries) {
-        try {
-          console.log(`[AI Breakdown] Generating content (attempt ${retryCount + 1})...`);
-          result = await model.generateContent(prompt);
-          break;
-        } catch (err: any) {
-          console.error(`[AI Breakdown] Attempt ${retryCount + 1} failed:`, err);
-          const status = err?.status || err?.response?.status;
-          const message = err?.message || "";
-
-          if (retryCount < maxRetries && (status === 503 || message.includes('503'))) {
-            retryCount++;
-            console.log("[AI Breakdown] Retrying in 1s...");
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (!result) throw new Error("AI generation failed or returned no result");
-
+      const result = await model.generateContent(prompt);
       const response = await result.response;
       parsed = cleanJsonResponse(response.text());
     }
 
     if (!isValidTaskArray(parsed)) {
-      console.error("[AI Breakdown] Invalid AI response payload:", parsed);
-      return NextResponse.json(
-        { error: "AI 返回的数据格式不正确，请稍后重试" },
-        { status: 502 }
-      );
+      return jsonError(502, 'invalid_ai_response', 'AI 返回的数据格式不正确，请稍后重试。');
     }
 
-    console.log("[AI Breakdown] Successfully parsed tasks");
     return NextResponse.json(parsed);
-  } catch (error: any) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const status = error?.status || error?.response?.status || 500;
-    
-    console.error("[AI Breakdown] Route failed:", error);
+  } catch (error: unknown) {
+    const message = getErrorMessage(error) || 'Unknown error';
+    const status = getErrorStatus(error) || 500;
 
-    // Specific error mapping
-    if (status === 503 || message.includes("503") || message.includes("Service Unavailable")) {
-      return NextResponse.json(
-        { error: "Gemini 服务当前不可用 (503 Service Unavailable)，请检查代理是否正常运行 (7897)" },
-        { status: 503 }
-      );
+    console.error('[AI Breakdown] Route failed:', error);
+
+    if (status === 503 || message.includes('503') || message.includes('Service Unavailable')) {
+      return jsonError(503, 'provider_unavailable', 'AI 服务当前不可用，请稍后重试。');
     }
 
-    if (message.includes("API key not valid") || status === 401) {
-      return NextResponse.json({ error: "Gemini API Key 无效，请检查 .env.local 配置" }, { status: 401 });
+    if (message.includes('API key not valid') || status === 401) {
+      return jsonError(401, 'invalid_api_key', 'API Key 无效，请检查设置。');
     }
 
-    if (status === 404 || message.includes("is not found") || message.includes("Model not found")) {
-      return NextResponse.json(
-        { error: `配置的模型 ${process.env.GEMINI_MODEL} 不可用，建议设置为 gemini-1.5-flash` },
-        { status: 404 }
-      );
+    if (status === 404 || message.includes('is not found') || message.includes('Model not found')) {
+      return jsonError(404, 'model_not_found', `配置的模型 ${process.env.GEMINI_MODEL || '当前模型'} 不可用，请检查模型设置。`);
     }
 
-    if (message.includes("fetch failed")) {
-      return NextResponse.json(
-        {
-          error:
-            "服务端无法连接 Gemini API，请确保 Clash 代理已开启并允许 generativelanguage.googleapis.com",
-        },
-        { status: 502 }
-      );
+    if (message.includes('fetch failed')) {
+      return jsonError(502, 'network_unreachable', '服务端无法连接 AI API，请检查网络或代理配置。');
     }
 
-    if (message.includes("User location is not supported") || status === 403) {
-      return NextResponse.json(
-        { error: "当前地区不受支持，请切换代理至支持的地区 (如新加坡、美国)" },
-        { status: 403 }
-      );
-    }
-    
-    if (message.includes("quota") || status === 429) {
-      return NextResponse.json(
-        { error: "Gemini API 额度已用完或请求太频繁，请稍后再试" },
-        { status: 429 }
-      );
+    if (message.includes('User location is not supported') || status === 403) {
+      return jsonError(403, 'region_unsupported', '当前地区不受支持，请切换到受支持的服务端网络环境。');
     }
 
-    return NextResponse.json({ error: `AI 拆解失败: ${message}` }, { status: 500 });
+    if (message.includes('quota') || status === 429) {
+      return jsonError(429, 'quota_exceeded', 'API 配额已用尽或请求过于频繁，请稍后再试。');
+    }
+
+    return jsonError(500, 'ai_request_failed', 'AI 拆解失败，请稍后重试。');
   }
 }

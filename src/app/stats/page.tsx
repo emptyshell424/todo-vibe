@@ -1,19 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, Suspense } from 'react';
-import {
-  App,
-  Card,
-  Col,
-  Empty,
-  Progress,
-  Row,
-  Skeleton,
-  Spin,
-  Statistic,
-  Tag,
-  Typography,
-} from 'antd';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { App, Card, Col, Progress, Row, Skeleton, Statistic, Tag } from 'antd';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -21,15 +9,14 @@ import {
   FireOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { useUser } from '@clerk/nextjs';
-import { supabase } from '@/lib/supabaseClient';
+import { useAuth, useUser } from '@clerk/nextjs';
+import { useSearchParams } from 'next/navigation';
+import { createClerkSupabaseClient } from '@/lib/supabaseClient';
 import { useI18n } from '@/components/I18nProvider';
 import SignInPrompt from '@/components/SignInPrompt';
-
-const { Title, Text } = Typography;
+import { TASK_SELECT, coerceTaskRows, filterTasksByScope, getVisibleTasks, hydrateTasks, type DisplayTask } from '@/lib/taskModel';
 
 export default function StatsPage() {
-  const { t } = useI18n();
   return (
     <Suspense fallback={<div className="workspace-home"><Skeleton active paragraph={{ rows: 10 }} /></div>}>
       <StatsContent />
@@ -40,23 +27,25 @@ export default function StatsPage() {
 function StatsContent() {
   const { t } = useI18n();
   const { isLoaded, isSignedIn, user } = useUser();
+  const { getToken } = useAuth();
+  const supabase = useMemo(() => createClerkSupabaseClient(getToken), [getToken]);
   const { notification } = App.useApp();
+  const searchParams = useSearchParams();
+  const searchQuery = searchParams.get('q')?.trim() ?? '';
 
-  const [todos, setTodos] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<DisplayTask[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchTodos = async () => {
-      if (!isSignedIn || !user) {
+    const fetchTasks = async () => {
+      if (!isLoaded || !isSignedIn || !user) {
+        setTasks([]);
         setLoading(false);
         return;
       }
 
       setLoading(true);
-      const { data, error } = await supabase
-        .from('todos')
-        .select('*')
-        .eq('user_id', user.id);
+      const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('user_id', user.id);
 
       if (error) {
         notification.error({
@@ -64,30 +53,33 @@ function StatsContent() {
           description: error.message,
         });
       } else {
-        setTodos(data || []);
+        setTasks(getVisibleTasks(hydrateTasks(coerceTaskRows(data))));
       }
 
       setLoading(false);
     };
 
-    fetchTodos();
-  }, [isSignedIn, notification, user, t]);
+    void fetchTasks();
+  }, [isLoaded, isSignedIn, notification, supabase, t, user]);
+
+  const filteredTasks = useMemo(
+    () => filterTasksByScope(tasks, { searchQuery }),
+    [searchQuery, tasks]
+  );
 
   const stats = useMemo(() => {
-    const total = todos.length;
-    const completed = todos.filter((t) => t.is_completed).length;
+    const total = filteredTasks.length;
+    const completed = filteredTasks.filter((task) => task.is_completed).length;
     const active = total - completed;
     const rate = total === 0 ? 0 : Math.round((completed / total) * 100);
-    
-    // Priority distribution
-    const urgent = todos.filter(t => t.priority === 'urgent').length;
-    const normal = total - urgent;
+    const p1 = filteredTasks.filter((task) => task.priority === 4).length;
+    const p2 = filteredTasks.filter((task) => task.priority === 3).length;
+    const p3 = filteredTasks.filter((task) => task.priority === 2).length;
+    const p4 = filteredTasks.filter((task) => task.priority === 1).length;
+    const aiGroups = new Set(filteredTasks.filter((task) => task.parent_id).map((task) => task.parent_id)).size;
 
-    // AI groups
-    const aiGroups = todos.filter(t => t.text.includes('[[AI_BREAKDOWN]]')).length;
-
-    return { total, completed, active, rate, urgent, normal, aiGroups };
-  }, [todos]);
+    return { total, completed, active, rate, p1, p2, p3, p4, aiGroups };
+  }, [filteredTasks]);
 
   if (!isLoaded) {
     return (
@@ -111,7 +103,7 @@ function StatsContent() {
     <section className="workspace-home">
       <section className="hero-strip">
         <div>
-          <span className="eyebrow">Insights & Metrics</span>
+          <span className="eyebrow">{t('insightsMetrics')}</span>
           <h2>
             {t('efficiencyInsights')}
             <span>{t('growthTrajectory')}</span>
@@ -130,96 +122,79 @@ function StatsContent() {
         <Row gutter={[24, 24]}>
           <Col xs={24} sm={12} lg={6}>
             <Card variant="borderless" className="metric-card shadow-sm">
-              <Statistic
-                title={t('totalTasks')}
-                value={stats.total}
-                prefix={<DashboardOutlined />}
-                styles={{ content: { color: '#006592' } }}
-              />
+              <Statistic title={t('totalTasks')} value={stats.total} prefix={<DashboardOutlined />} styles={{ content: { color: '#006592' } }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card variant="borderless" className="metric-card shadow-sm">
-              <Statistic
-                title={t('completed')}
-                value={stats.completed}
-                prefix={<CheckCircleOutlined />}
-                styles={{ content: { color: '#52c41a' } }}
-              />
+              <Statistic title={t('completed')} value={stats.completed} prefix={<CheckCircleOutlined />} styles={{ content: { color: '#52c41a' } }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card variant="borderless" className="metric-card shadow-sm">
-              <Statistic
-                title={t('pending')}
-                value={stats.active}
-                prefix={<ClockCircleOutlined />}
-                styles={{ content: { color: '#1890ff' } }}
-              />
+              <Statistic title={t('pending')} value={stats.active} prefix={<ClockCircleOutlined />} styles={{ content: { color: '#1890ff' } }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card variant="borderless" className="metric-card shadow-sm">
-              <Statistic
-                title={t('aiAssisted')}
-                value={stats.aiGroups}
-                prefix={<ThunderboltOutlined />}
-                styles={{ content: { color: '#722ed1' } }}
-              />
+              <Statistic title={t('aiAssisted')} value={stats.aiGroups} prefix={<ThunderboltOutlined />} styles={{ content: { color: '#722ed1' } }} />
             </Card>
           </Col>
         </Row>
 
         <div className="stats-main-grid">
-           <Row gutter={[24, 24]} className="mt-6">
-             <Col xs={24} lg={16}>
-               <Card title={t('completionEfficiency')} variant="borderless" className="shadow-sm">
-                 <div className="progress-section">
-                   <div className="progress-label">
-                     <span>{t('overallCompletionRate')}</span>
-                     <strong>{stats.rate}%</strong>
-                   </div>
-                    <Progress 
-                     percent={stats.rate} 
-                     strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
-                     status="active"
-                     size={12}
-                     showInfo={false}
-                    />
-                   <p className="description mt-4 text-gray-500">
-                     {t('completionRateDesc')}
-                   </p>
-                 </div>
-               </Card>
-             </Col>
-             <Col xs={24} lg={8}>
-               <Card title={t('focusDistribution')} variant="borderless" className="shadow-sm">
-                 <div className="priority-distribution">
-                   <div className="dist-item mb-4">
-                     <div className="flex justify-between mb-2">
-                        <Tag color="error">{t('highFocus')} (Urgent)</Tag>
-                        <span>{stats.urgent}</span>
-                     </div>
-                     <Progress percent={stats.total ? (stats.urgent / stats.total) * 100 : 0} size="small" showInfo={false} strokeColor="#ff4d4f" />
-                   </div>
-                   <div className="dist-item">
-                     <div className="flex justify-between mb-2">
-                        <Tag color="processing">{t('steadyPace')} (Normal)</Tag>
-                        <span>{stats.normal}</span>
-                     </div>
-                     <Progress percent={stats.total ? (stats.normal / stats.total) * 100 : 0} size="small" showInfo={false} strokeColor="#1890ff" />
-                   </div>
-                 </div>
-               </Card>
-             </Col>
-           </Row>
+          <Row gutter={[24, 24]} className="mt-6">
+            <Col xs={24} lg={16}>
+              <Card title={t('completionEfficiency')} variant="borderless" className="shadow-sm">
+                <div className="progress-section">
+                  <div className="progress-label">
+                    <span>{t('overallCompletionRate')}</span>
+                    <strong>{stats.rate}%</strong>
+                  </div>
+                  <Progress
+                    percent={stats.rate}
+                    strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
+                    status={loading ? 'active' : 'normal'}
+                    size={12}
+                    showInfo={false}
+                  />
+                  <p className="description mt-4 text-gray-500">{t('completionRateDesc')}</p>
+                </div>
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card title={t('focusDistribution')} variant="borderless" className="shadow-sm">
+                <div className="priority-distribution">
+                  {[
+                    { label: 'P1', count: stats.p1, color: 'error', stroke: '#ff4d4f' },
+                    { label: 'P2', count: stats.p2, color: 'warning', stroke: '#faad14' },
+                    { label: 'P3', count: stats.p3, color: 'processing', stroke: '#1677ff' },
+                    { label: 'P4', count: stats.p4, color: 'default', stroke: '#8c8c8c' },
+                  ].map((item) => (
+                    <div key={item.label} className="dist-item mb-4">
+                      <div className="flex justify-between mb-2">
+                        <Tag color={item.color}>{item.label}</Tag>
+                        <span>{item.count}</span>
+                      </div>
+                      <Progress
+                        percent={stats.total ? (item.count / stats.total) * 100 : 0}
+                        size="small"
+                        showInfo={false}
+                        strokeColor={item.stroke}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </Col>
+          </Row>
 
-           <section className="wisdom-card full mt-6">
+          <section className="wisdom-card full mt-6">
             <div className="wisdom-overlay" />
             <div className="wisdom-content">
               <FireOutlined />
               <p>{t('statsWisdomQuote')}</p>
-              <span>The Rituals of Focus</span>
+              <span>{t('ritualsOfFocus')}</span>
             </div>
           </section>
         </div>

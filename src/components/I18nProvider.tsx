@@ -1,46 +1,53 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import enUS from 'antd/locale/en_US';
-import { translations, Language } from '@/lib/translations';
+import { translations, type Language, type TranslationKey } from '@/lib/translations';
+
+type TranslationParams = Record<string, string | number>;
 
 type I18nContextType = {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: keyof typeof translations['en'], params?: Record<string, any>) => string;
+  t: (key: TranslationKey, params?: TranslationParams) => string;
 };
 
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
-export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>('zh');
+function resolveInitialLanguage(): Language {
+  if (typeof window === 'undefined') {
+    return 'zh';
+  }
 
-  useEffect(() => {
-    const savedLang = localStorage.getItem('language') as Language;
-    if (savedLang && (savedLang === 'en' || savedLang === 'zh')) {
-      setLanguageState(savedLang);
-    } else {
-      const browserLang = navigator.language.startsWith('zh') ? 'zh' : 'en';
-      setLanguageState(browserLang);
-    }
-  }, []);
+  const savedLang = localStorage.getItem('language');
+  if (savedLang === 'en' || savedLang === 'zh') {
+    return savedLang;
+  }
+
+  return navigator.language.startsWith('zh') ? 'zh' : 'en';
+}
+
+export function I18nProvider({ children }: { children: React.ReactNode }) {
+  const [language, setLanguageState] = useState<Language>(() => resolveInitialLanguage());
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    localStorage.setItem('language', lang);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('language', lang);
+    }
   };
 
-  const t = (key: keyof typeof translations['en'], params?: Record<string, any>) => {
-    let text = translations[language][key] || translations['en'][key] || key;
-    
+  const t = (key: TranslationKey, params?: TranslationParams) => {
+    let text = translations[language][key] || translations.en[key] || key;
+
     if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(`{${k}}`, String(v));
-      });
+      for (const [paramKey, paramValue] of Object.entries(params)) {
+        text = text.replace(`{${paramKey}}`, String(paramValue));
+      }
     }
-    
+
     return text;
   };
 
@@ -48,7 +55,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <I18nContext.Provider value={{ language, setLanguage, t }}>
-      <ConfigProvider 
+      <ConfigProvider
         locale={antdLocale}
         theme={{
           token: {
@@ -70,5 +77,6 @@ export function useI18n() {
   if (context === undefined) {
     throw new Error('useI18n must be used within an I18nProvider');
   }
+
   return context;
 }

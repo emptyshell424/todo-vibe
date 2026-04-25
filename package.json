@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "set HTTP_PROXY=http://127.0.0.1:7897&& set HTTPS_PROXY=http://127.0.0.1:7897&& next dev",
-    "dev:no-proxy": "next dev",
+    "dev": "next dev --webpack",
+    "dev:proxy": "set HTTP_PROXY=http://127.0.0.1:7897&& set HTTPS_PROXY=http://127.0.0.1:7897&& next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "test": "vitest run --pool=threads",
+    "lint": "eslint",
+    "check:encoding": "node scripts/check-mojibake.mjs",
+    "check:task-logic": "node scripts/check-task-logic.mjs",
+    "check:task-scale": "node scripts/check-task-scale.mjs",
+    "check:rls": "node scripts/validate-rls.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.0",
@@ -23,11 +28,13 @@
     "undici": "^7.24.7"
   },
   "devDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "^1.0.0-rc.16",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.5"
   }
 }

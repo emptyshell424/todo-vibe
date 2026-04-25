@@ -1,31 +1,32 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, Suspense } from 'react';
-import {
-  App,
-  Button,
-  Empty,
-  Pagination,
-  Skeleton,
-  Spin,
-  Typography,
-} from 'antd';
-import {
-  CheckCircleOutlined,
-  DeleteOutlined,
-} from '@ant-design/icons';
-import { useUser } from '@clerk/nextjs';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { App, Button, Empty, Pagination, Skeleton, Spin } from 'antd';
+import { DeleteOutlined } from '@ant-design/icons';
+import { useAuth, useUser } from '@clerk/nextjs';
 import { useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
-import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
-import { parseTodo } from '@/lib/todoUtils';
+import { createClerkSupabaseClient } from '@/lib/supabaseClient';
+import TodoItem, { type DisplayTask, type Task } from '@/components/TodoItem';
 import { useI18n } from '@/components/I18nProvider';
 import SignInPrompt from '@/components/SignInPrompt';
-
-const { Title, Text } = Typography;
+import {
+  PROJECT_SELECT,
+  SECTION_SELECT,
+  coerceProjectRows,
+  coerceSectionRows,
+  filterTasksByScope,
+  type Label,
+  type Project,
+  type Recurrence,
+  type RecurrenceRule,
+  type Reminder,
+  type Section,
+  type TaskLabel,
+} from '@/lib/taskModel';
+import { createTask, deleteTasks, listTasks, updateTask } from '@/lib/taskRepository';
+import { listTaskMetadata, setTaskLabels, upsertRecurrence, upsertReminder } from '@/lib/taskMetadataRepository';
 
 export default function CompletedPage() {
-  const { t } = useI18n();
   return (
     <Suspense fallback={<div className="workspace-home"><Skeleton active paragraph={{ rows: 10 }} /></div>}>
       <CompletedContent />
@@ -36,32 +37,47 @@ export default function CompletedPage() {
 function CompletedContent() {
   const { t } = useI18n();
   const { isLoaded, isSignedIn, user } = useUser();
+  const { getToken } = useAuth();
+  const supabase = useMemo(() => createClerkSupabaseClient(getToken), [getToken]);
   const { message, notification, modal } = App.useApp();
+  const searchParams = useSearchParams();
+  const searchQuery = searchParams.get('q')?.trim() ?? '';
 
-  const [todos, setTodos] = useState<Todo[]>([]);
+  const [tasks, setTasks] = useState<DisplayTask[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
+  const [taskLabels, setTaskLabelsState] = useState<TaskLabel[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
-  const [currentPage, setCurrentPage] = useState(1);
+  const [pages, setPages] = useState<Record<string, number>>({});
   const pageSize = 12;
-  
-  const searchParams = useSearchParams();
-  const searchQuery = searchParams.get('q') || '';
+
+  const pageKey = searchQuery || 'all';
+  const currentPage = pages[pageKey] ?? 1;
 
   useEffect(() => {
-    const fetchCompletedTodos = async () => {
-      if (!isSignedIn || !user) {
+    const fetchCompletedTasks = async () => {
+      if (!isLoaded || !isSignedIn || !user) {
+        setTasks([]);
         setLoading(false);
         return;
       }
 
       setLoading(true);
-      const { data, error } = await supabase
-        .from('todos')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_completed', true)
-        .order('created_at', { ascending: false });
+      const [{ data, error }, { data: projectData }, { data: sectionData }, metadata] = await Promise.all([
+        listTasks(supabase, {
+          userId: user.id,
+          scope: 'completed',
+          searchQuery,
+        }),
+        supabase.from('projects').select(PROJECT_SELECT).eq('user_id', user.id).eq('is_archived', false),
+        supabase.from('sections').select(SECTION_SELECT).eq('user_id', user.id),
+        listTaskMetadata(supabase, user.id),
+      ]);
 
       if (error) {
         notification.error({
@@ -69,60 +85,55 @@ function CompletedContent() {
           description: error.message,
         });
       } else {
-        setTodos(data || []);
+        setTasks(data);
       }
 
+      setProjects(coerceProjectRows(projectData));
+      setSections(coerceSectionRows(sectionData));
+      setLabels(metadata.labels);
+      setTaskLabelsState(metadata.taskLabels);
+      setReminders(metadata.reminders);
+      setRecurrences(metadata.recurrences);
       setLoading(false);
     };
 
-    fetchCompletedTodos();
-  }, [isSignedIn, notification, user, t]);
+    void fetchCompletedTasks();
+  }, [isLoaded, isSignedIn, notification, searchQuery, supabase, t, user]);
 
-  const filteredTodos = useMemo(() => {
-    let result = todos;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter((todo) => {
-        const parsed = parseTodo(todo);
-        return (
-          parsed.displayText.toLowerCase().includes(q) ||
-          (parsed.groupTitle && parsed.groupTitle.toLowerCase().includes(q))
-        );
-      });
-    }
-    return result;
-  }, [todos, searchQuery]);
+  const filteredTasks = useMemo(
+    () => filterTasksByScope(tasks, { searchQuery }),
+    [searchQuery, tasks]
+  );
 
-  const paginatedTodos = useMemo(() => {
+  const paginatedTasks = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return filteredTodos.slice(start, start + pageSize);
-  }, [filteredTodos, currentPage]);
+    return filteredTasks.slice(start, start + pageSize);
+  }, [currentPage, filteredTasks]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery]);
+  const setCurrentPage = (page: number) => {
+    setPages((prev) => ({ ...prev, [pageKey]: page }));
+  };
 
   const handleToggle = async (id: string) => {
-    if (!user) return;
-    const target = todos.find((t) => t.id === id);
-    if (!target) return;
+    if (!user) {
+      return;
+    }
 
     setTogglingIds((prev) => new Set(prev).add(id));
-    const newStatus = !target.is_completed;
+    const updates = {
+      is_completed: false,
+      completed_at: null,
+    };
 
-    const { error } = await supabase
-      .from('todos')
-      .update({ is_completed: newStatus })
-      .eq('id', id)
-      .eq('user_id', user.id);
+    const { error } = await updateTask(supabase, user.id, id, updates);
 
     if (error) {
       notification.error({ title: t('statusUpdateFailed'), description: error.message });
     } else {
-      // Since this is the completed page, unmarking means it disappears
-      setTodos((prev) => prev.filter((t) => t.id !== id));
+      setTasks((prev) => prev.filter((task) => task.id !== id));
       message.success(t('movedBackToList'));
     }
+
     setTogglingIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -136,16 +147,22 @@ function CompletedContent() {
       content: t('deleteTaskDesc'),
       okText: t('deleteOk'),
       okType: 'danger',
-      async onOk() {
-        if (!user) return;
+      onOk: async () => {
+        if (!user) {
+          return;
+        }
+
         setDeletingIds((prev) => new Set(prev).add(id));
-        const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', user.id);
+
+        const { error } = await deleteTasks(supabase, user.id, [id]);
+
         if (error) {
           notification.error({ title: t('deleteFailed'), description: error.message });
         } else {
-          setTodos((prev) => prev.filter((t) => t.id !== id));
+          setTasks((prev) => prev.filter((task) => task.id !== id));
           message.success(t('deleteSuccess'));
         }
+
         setDeletingIds((prev) => {
           const next = new Set(prev);
           next.delete(id);
@@ -155,34 +172,104 @@ function CompletedContent() {
     });
   };
 
-  const handleUpdate = async (id: string, updates: Partial<Todo>) => {
-    if (!user) return;
-    const { error } = await supabase.from('todos').update(updates).eq('id', id).eq('user_id', user.id);
+  const handleUpdate = async (id: string, updates: Partial<Task>) => {
+    if (!user) {
+      return;
+    }
+
+    const { error } = await updateTask(supabase, user.id, id, updates);
+
     if (error) {
       notification.error({ title: t('updateFailed'), description: error.message });
-    } else {
-      setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+      return;
     }
+
+    setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, ...updates } : task)));
+  };
+
+  const handleCreateSubtask = async (parent: DisplayTask, title: string) => {
+    if (!user) {
+      return;
+    }
+
+    const { data, error } = await createTask(supabase, {
+      title,
+      notes: '',
+      is_completed: false,
+      priority: parent.priority,
+      user_id: user.id,
+      project_id: parent.project_id,
+      section_id: parent.section_id,
+      parent_id: parent.id,
+      due_at: parent.due_at,
+      completed_at: null,
+      sort_order: Date.now(),
+      source: 'manual',
+    });
+
+    if (error) {
+      notification.error({ title: t('addFailed'), description: error.message });
+      return;
+    }
+
+    setTasks((prev) => (data ? [data, ...prev] : prev));
+    message.success(t('taskAdded'));
+  };
+
+  const handleUpdateMetadata = async (
+    task: DisplayTask,
+    metadata: { labelIds?: string[]; reminderAt?: string | null; recurrenceRule?: RecurrenceRule | null }
+  ) => {
+    if (!user) {
+      return;
+    }
+
+    const [labelResult, reminderResult, recurrenceResult] = await Promise.all([
+      metadata.labelIds ? setTaskLabels(supabase, user.id, task.id, metadata.labelIds) : Promise.resolve({ error: null }),
+      metadata.reminderAt !== undefined ? upsertReminder(supabase, user.id, task.id, metadata.reminderAt) : Promise.resolve({ error: null }),
+      metadata.recurrenceRule !== undefined
+        ? upsertRecurrence(supabase, user.id, task.id, metadata.recurrenceRule, task.due_at)
+        : Promise.resolve({ error: null }),
+    ]);
+
+    const error = labelResult.error || reminderResult.error || recurrenceResult.error;
+    if (error) {
+      notification.error({ title: t('updateFailed'), description: error.message });
+      return;
+    }
+
+    const nextMetadata = await listTaskMetadata(supabase, user.id);
+    setLabels(nextMetadata.labels);
+    setTaskLabelsState(nextMetadata.taskLabels);
+    setReminders(nextMetadata.reminders);
+    setRecurrences(nextMetadata.recurrences);
   };
 
   const handleClearAll = () => {
-    if (todos.length === 0) return;
+    if (tasks.length === 0) {
+      return;
+    }
+
     modal.confirm({
       title: t('clearAllCompletedTitle'),
-      content: t('clearAllCompletedConfirm', { count: todos.length }),
+      content: t('clearAllCompletedConfirm', { count: tasks.length }),
       okText: t('clearCompletedOk'),
       okType: 'danger',
-      async onOk() {
-        const { error } = await supabase
-          .from('todos')
-          .delete()
-          .eq('is_completed', true)
-          .eq('user_id', user?.id);
+      onOk: async () => {
+        if (!user) {
+          return;
+        }
+
+        const { error } = await deleteTasks(
+          supabase,
+          user.id,
+          filteredTasks.map((task) => task.id)
+        );
 
         if (error) {
           notification.error({ title: t('operationFailed'), description: error.message });
         } else {
-          setTodos([]);
+          setTasks((prev) => prev.filter((task) => !filteredTasks.some((filteredTask) => filteredTask.id === task.id)));
           message.success(t('clearCompletedSuccess'));
         }
       },
@@ -211,7 +298,7 @@ function CompletedContent() {
     <section className="workspace-home">
       <section className="hero-strip">
         <div>
-          <span className="eyebrow">Archive View</span>
+          <span className="eyebrow">{t('archiveView')}</span>
           <h2>
             {t('completedTasks')}
             <span>{t('achievementList')}</span>
@@ -220,7 +307,7 @@ function CompletedContent() {
         </div>
         <div className="hero-stats">
           <div className="hero-stat-card">
-            <strong>{todos.length}</strong>
+            <strong>{filteredTasks.length}</strong>
             <span>{t('tasksCompleted')}</span>
           </div>
         </div>
@@ -231,7 +318,7 @@ function CompletedContent() {
           <h3>{t('history')}</h3>
           <p>{searchQuery ? t('searchResultsFor', { query: searchQuery }) : t('allHistoryDesc')}</p>
         </div>
-        {todos.length > 0 && (
+        {filteredTasks.length > 0 && (
           <Button danger icon={<DeleteOutlined />} onClick={handleClearAll}>
             {t('clearAllRecords')}
           </Button>
@@ -242,31 +329,39 @@ function CompletedContent() {
         <Spin spinning={loading}>
           {loading ? (
             <Skeleton active paragraph={{ rows: 6 }} />
-          ) : filteredTodos.length === 0 ? (
+          ) : filteredTasks.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={searchQuery ? t('noTasksTitle') : t('noCompletedFound')}
             />
           ) : (
             <div className="task-list-stack">
-              {paginatedTodos.map((todo, index) => (
+              {paginatedTasks.map((task) => (
                 <TodoItem
-                  key={todo.id}
-                  item={parseTodo(todo)}
-                  index={index}
+                  key={`${task.id}:${task.updated_at}`}
+                  item={task}
                   togglingIds={togglingIds}
                   deletingIds={deletingIds}
                   onToggle={handleToggle}
                   onDelete={handleDelete}
                   onUpdate={handleUpdate}
+                  onCreateSubtask={handleCreateSubtask}
+                  onUpdateMetadata={handleUpdateMetadata}
+                  projects={projects}
+                  sections={sections}
+                  parentCandidates={tasks}
+                  labels={labels}
+                  taskLabelIds={taskLabels.filter((label) => label.task_id === task.id).map((label) => label.label_id)}
+                  reminder={reminders.find((reminder) => reminder.task_id === task.id) ?? null}
+                  recurrence={recurrences.find((recurrence) => recurrence.task_id === task.id) ?? null}
                 />
               ))}
               <div className="pagination-wrapper">
                 <Pagination
                   current={currentPage}
                   pageSize={pageSize}
-                  total={filteredTodos.length}
-                  onChange={(page) => setCurrentPage(page)}
+                  total={filteredTasks.length}
+                  onChange={setCurrentPage}
                   hideOnSinglePage
                   showSizeChanger={false}
                   className="custom-pagination"

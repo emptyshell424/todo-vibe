@@ -1,46 +1,63 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, Suspense } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   Button,
-  Checkbox,
   Empty,
   Input,
   type InputRef,
   Pagination,
   Progress,
+  Select,
   Segmented,
   Skeleton,
   Spin,
   Tabs,
-  Tag,
-  Typography,
 } from 'antd';
+import { DatePicker } from 'antd';
 import {
-  ArrowRightOutlined,
-  CalendarOutlined,
   CheckCircleOutlined,
-  ClockCircleOutlined,
-  DeleteOutlined,
   ExclamationCircleOutlined,
   FireOutlined,
   PlusOutlined,
   RobotOutlined,
-  SearchOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { DatePicker } from 'antd';
-import { SignInButton, useUser } from '@clerk/nextjs';
+import dayjs, { type Dayjs } from 'dayjs';
+import { useAuth, useUser } from '@clerk/nextjs';
 import { useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
-import TodoItem, { type ParsedTodo, type Todo } from '@/components/TodoItem';
-import { useI18n } from '@/components/I18nProvider';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createClerkSupabaseClient } from '@/lib/supabaseClient';
+import TodoItem, { type DisplayTask, type Task } from '@/components/TodoItem';
+import { useI18n } from '@/components/I18nProvider';
 import SignInPrompt from '@/components/SignInPrompt';
-
-const { Text, Title } = Typography;
-import { AI_BREAKDOWN_PREFIX, parseTodo, encodeAiBreakdownText, encodeNormalTodoText } from '@/lib/todoUtils';
+import { getApiErrorMessage } from '@/lib/api';
+import {
+  TASK_SELECT,
+  coerceTaskRows,
+  coerceProjectRows,
+  coerceSectionRows,
+  filterTasksByScope,
+  getDateGroupKey,
+  getVisibleTasks,
+  hydrateTasks,
+  isTaskAfterToday,
+  isTaskInTodayScope,
+  type Label,
+  PROJECT_SELECT,
+  type Recurrence,
+  type RecurrenceRule,
+  type Reminder,
+  SECTION_SELECT,
+  type Project,
+  type Section,
+  type TaskLabel,
+  type TaskPriority,
+} from '@/lib/taskModel';
+import { createTask, deleteTasks, listTasks, toggleTaskComplete, updateTask } from '@/lib/taskRepository';
+import { advanceRecurringTask, listTaskMetadata, setTaskLabels, upsertRecurrence, upsertReminder } from '@/lib/taskMetadataRepository';
+import { parseQuickTasks } from '@/lib/quickAdd';
 
 type AiBreakdownTask = {
   title: string;
@@ -48,8 +65,11 @@ type AiBreakdownTask = {
 };
 
 type TodoListEntry =
-  | { type: 'single'; todo: ParsedTodo }
-  | { type: 'group'; key: string; title: string; todos: ParsedTodo[] };
+  | { type: 'single'; task: DisplayTask }
+  | { type: 'group'; key: string; title: string; tasks: DisplayTask[] };
+
+const INBOX_PROJECT_SELECT_VALUE = '__inbox__';
+const NO_SECTION_SELECT_VALUE = '__no_section__';
 
 function isValidAiBreakdownTasks(value: unknown): value is AiBreakdownTask[] {
   return (
@@ -66,6 +86,44 @@ function isValidAiBreakdownTasks(value: unknown): value is AiBreakdownTask[] {
   );
 }
 
+function priorityFromAi(priority: AiBreakdownTask['priority']): TaskPriority {
+  switch (priority) {
+    case 'high':
+      return 4;
+    case 'medium':
+      return 3;
+    default:
+      return 1;
+  }
+}
+
+function prioritySegmentOptions() {
+  return [
+    { label: 'P1', value: 4 },
+    { label: 'P2', value: 3 },
+    { label: 'P3', value: 2 },
+    { label: 'P4', value: 1 },
+  ];
+}
+
+function computeStreakDays(tasks: DisplayTask[]) {
+  const completionDays = new Set(
+    tasks
+      .filter((task) => task.is_completed)
+      .map((task) => getDateGroupKey(task.completed_at ?? task.updated_at ?? task.created_at))
+  );
+
+  let streak = 0;
+  const cursor = new Date();
+
+  while (completionDays.has(getDateGroupKey(cursor.toISOString()))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return streak;
+}
+
 export default function Home() {
   return (
     <Suspense fallback={<div className="workspace-home"><Skeleton active paragraph={{ rows: 10 }} /></div>}>
@@ -75,11 +133,22 @@ export default function Home() {
 }
 
 function HomeContent() {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const { isLoaded, isSignedIn, user } = useUser();
+  const { getToken } = useAuth();
+  const supabase = useMemo(() => createClerkSupabaseClient(getToken), [getToken]);
   const { message, notification, modal } = App.useApp();
+  const searchParams = useSearchParams();
+  const searchQuery = searchParams.get('q')?.trim() ?? '';
+  const inputRef = useRef<InputRef>(null);
 
-  const [todos, setTodos] = useState<Todo[]>([]);
+  const [tasks, setTasks] = useState<DisplayTask[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
+  const [taskLabels, setTaskLabelsState] = useState<TaskLabel[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [loading, setLoading] = useState(true);
   const [inputValue, setInputValue] = useState('');
   const [adding, setAdding] = useState(false);
@@ -87,21 +156,89 @@ function HomeContent() {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'completed'>('all');
   const [breakingDown, setBreakingDown] = useState(false);
-  const searchParams = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
-  const [newPriority, setNewPriority] = useState<'normal' | 'urgent'>('normal');
+  const [newPriority, setNewPriority] = useState<TaskPriority>(1);
   const [scheduledDate, setScheduledDate] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [composerProjectId, setComposerProjectId] = useState<string | null>(null);
+  const [composerSectionId, setComposerSectionId] = useState<string | null>(null);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set());
+  const [pages, setPages] = useState<Record<string, number>>({});
   const pageSize = 10;
 
-  useEffect(() => {
-    setSearchQuery(searchParams.get('q') || '');
-    setCurrentPage(1);
-  }, [searchParams]);
+  const pageKey = `${activeTab}:${searchQuery}`;
+  const currentPage = pages[pageKey] ?? 1;
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeTab]);
+  const scopedTasks = tasks;
+
+  const todayTasks = useMemo(() => scopedTasks.filter((task) => isTaskInTodayScope(task)), [scopedTasks]);
+
+  const tabFilteredTasks = useMemo(() => {
+    switch (activeTab) {
+      case 'active':
+        return todayTasks.filter((task) => !task.is_completed);
+      case 'completed':
+        return todayTasks.filter((task) => task.is_completed);
+      default:
+        return todayTasks;
+    }
+  }, [activeTab, todayTasks]);
+
+  const filteredTasks = useMemo(
+    () => filterTasksByScope(tabFilteredTasks, { searchQuery }),
+    [searchQuery, tabFilteredTasks]
+  );
+
+  const allTodoListEntries = useMemo<TodoListEntry[]>(() => {
+    const entries: TodoListEntry[] = [];
+    const groupIndexByParentId = new Map<string, number>();
+    const taskIdsWithChildren = new Set(filteredTasks.map((task) => task.parent_id).filter(Boolean));
+
+    for (const task of filteredTasks) {
+      if (task.source === 'ai_plan' && taskIdsWithChildren.has(task.id)) {
+        continue;
+      }
+
+      if (task.parent_id && task.parentTitle) {
+        const existingEntryIndex = groupIndexByParentId.get(task.parent_id);
+        if (existingEntryIndex !== undefined) {
+          const existingEntry = entries[existingEntryIndex];
+          if (existingEntry.type === 'group') {
+            existingEntry.tasks.push(task);
+          }
+          continue;
+        }
+
+        groupIndexByParentId.set(task.parent_id, entries.length);
+        entries.push({
+          type: 'group',
+          key: task.parent_id,
+          title: task.parentTitle,
+          tasks: [task],
+        });
+        continue;
+      }
+
+      entries.push({ type: 'single', task });
+    }
+
+    return entries;
+  }, [filteredTasks]);
+
+  const todoListEntries = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return allTodoListEntries.slice(start, start + pageSize);
+  }, [allTodoListEntries, currentPage]);
+
+  const totalCount = todayTasks.length;
+  const completedCount = todayTasks.filter((task) => task.is_completed).length;
+  const activeCount = totalCount - completedCount;
+  const focusScore = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+  const groupedEntries = allTodoListEntries.filter((entry) => entry.type === 'group');
+  const streakDays = computeStreakDays(tasks);
+
+  const tomorrowPreview = useMemo(
+    () => scopedTasks.filter((task) => !task.is_completed && isTaskAfterToday(task)).slice(0, 3),
+    [scopedTasks]
+  );
 
   useEffect(() => {
     if (searchParams.get('focus') === 'true') {
@@ -109,111 +246,21 @@ function HomeContent() {
     }
   }, [searchParams]);
 
-  const inputRef = useRef<InputRef>(null);
-
-  const filteredTodos = useMemo(() => {
-    let result = todos;
-
-    // Filter by Today (Today means no due date, or due date is today)
-    const locale = language === 'zh' ? 'zh-CN' : 'en-US';
-    const todayStr = new Date().toLocaleDateString(locale);
-    
-    result = result.filter(todo => {
-      const parsed = parseTodo(todo);
-      const isToday = !parsed.due_date || new Date(parsed.due_date).toLocaleDateString(locale) === todayStr;
-      return isToday;
-    });
-
-    // Filter by tab
-    switch (activeTab) {
-      case 'active':
-        result = result.filter((todo) => !todo.is_completed);
-        break;
-      case 'completed':
-        result = result.filter((todo) => todo.is_completed);
-        break;
-    }
-
-    // Filter by search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter((todo) => {
-        const parsed = parseTodo(todo);
-        return (
-          parsed.displayText.toLowerCase().includes(q) ||
-          (parsed.groupTitle && parsed.groupTitle.toLowerCase().includes(q))
-        );
-      });
-    }
-
-    return result;
-  }, [todos, activeTab, searchQuery, language]);
-
-  const allTodoListEntries = useMemo<TodoListEntry[]>(() => {
-    const parsedTodos = filteredTodos.map(parseTodo);
-    const entries: TodoListEntry[] = [];
-
-    for (const todo of parsedTodos) {
-      if (!todo.groupTitle) {
-        entries.push({ type: 'single', todo });
-        continue;
-      }
-
-      const lastEntry = entries[entries.length - 1];
-      if (lastEntry && lastEntry.type === 'group' && lastEntry.title === todo.groupTitle) {
-        lastEntry.todos.push(todo);
-        continue;
-      }
-
-      entries.push({
-        type: 'group',
-        key: `${todo.groupTitle}-${todo.id}`,
-        title: todo.groupTitle,
-        todos: [todo],
-      });
-    }
-
-    return entries;
-  }, [filteredTodos]);
-
-  const todoListEntries = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return allTodoListEntries.slice(start, start + pageSize);
-  }, [allTodoListEntries, currentPage]);
-
-  const completedCount = useMemo(
-    () => todos.filter((todo) => todo.is_completed).length,
-    [todos]
-  );
-  const totalCount = todos.length;
-  const activeCount = totalCount - completedCount;
-  const focusScore = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
-  const groupedEntries = allTodoListEntries.filter((entry) => entry.type === 'group');
-  const streakDays = Math.max(1, Math.floor(completedCount / 2) + 1);
-  
-  const tomorrowPreview = useMemo(() => {
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    
-    return todos
-      .map(parseTodo)
-      .filter(t => t.due_date && new Date(t.due_date) > today && !t.is_completed)
-      .slice(0, 3);
-  }, [todos]);
-
   useEffect(() => {
-    const fetchTodos = async () => {
-      if (!isSignedIn || !user) {
+    const fetchTasks = async () => {
+      if (!isLoaded || !isSignedIn || !user) {
+        setTasks([]);
         setLoading(false);
         return;
       }
 
       setLoading(true);
-      const { data, error } = await supabase
-        .from('todos')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+      const [{ data, error }, { data: projectData }, { data: sectionData }, metadata] = await Promise.all([
+        listTasks(supabase, { userId: user.id }),
+        supabase.from('projects').select(PROJECT_SELECT).eq('user_id', user.id).eq('is_archived', false),
+        supabase.from('sections').select(SECTION_SELECT).eq('user_id', user.id),
+        listTaskMetadata(supabase, user.id),
+      ]);
 
       if (error) {
         notification.error({
@@ -222,61 +269,125 @@ function HomeContent() {
           placement: 'topRight',
         });
       } else {
-        setTodos(data || []);
+        setTasks(data);
       }
+
+      setProjects(coerceProjectRows(projectData));
+      setSections(coerceSectionRows(sectionData));
+      setLabels(metadata.labels);
+      setTaskLabelsState(metadata.taskLabels);
+      setReminders(metadata.reminders);
+      setRecurrences(metadata.recurrences);
 
       setLoading(false);
     };
 
-    fetchTodos();
-  }, [isSignedIn, notification, user, t]);
+    void fetchTasks();
+  }, [isLoaded, isSignedIn, notification, supabase, t, user]);
+
+  const setCurrentPage = (page: number) => {
+    setPages((prev) => ({ ...prev, [pageKey]: page }));
+  };
+
+  const toggleGroupCollapsed = (groupId: string) => {
+    setCollapsedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
+  const resetComposer = () => {
+    setInputValue('');
+    setNewPriority(1);
+    setScheduledDate(null);
+    setComposerProjectId(null);
+    setComposerSectionId(null);
+    setCurrentPage(1);
+  };
 
   const handleAdd = async () => {
-    const text = inputValue.trim();
-
-    if (!text) {
+    const parsedTasks = parseQuickTasks(inputValue);
+    if (parsedTasks.length === 0) {
       message.warning(t('writeSomethingFirst'));
       return;
     }
-    if (!user) return;
+
+    if (!user) {
+      return;
+    }
 
     setAdding(true);
-    const newTodo = {
-      text: encodeNormalTodoText(text, scheduledDate || undefined),
-      is_completed: false,
-      priority: newPriority,
-      user_id: user.id,
-    };
 
-    const { data, error } = await supabase.from('todos').insert(newTodo).select().single();
+    const createdTasks: DisplayTask[] = [];
+    let firstError: string | null = null;
 
-    if (error) {
+    for (const [index, parsedTask] of parsedTasks.entries()) {
+      const { data, error } = await createTask(supabase, {
+        title: parsedTask.title,
+        notes: '',
+        is_completed: false,
+        priority: parsedTask.priority || newPriority,
+        user_id: user.id,
+        project_id: composerProjectId,
+        section_id: composerSectionId,
+        due_at: scheduledDate ?? parsedTask.due_at,
+        completed_at: null,
+        sort_order: Date.now() - index,
+        source: 'manual',
+      });
+
+      if (error) {
+        firstError = error.message;
+        break;
+      }
+
+      if (data) {
+        createdTasks.push(data);
+        if (parsedTask.recurrenceRule) {
+          await upsertRecurrence(supabase, user.id, data.id, parsedTask.recurrenceRule, data.due_at);
+        }
+      }
+    }
+
+    if (firstError) {
       notification.error({
         title: t('addFailed'),
-        description: error.message,
+        description: firstError,
         placement: 'topRight',
       });
     } else {
-      setTodos((prev) => [data, ...prev]);
-      setInputValue('');
-      setNewPriority('normal');
-      setCurrentPage(1);
-      message.success(t('taskAdded'));
+      setTasks((prev) => [...createdTasks, ...prev]);
+      resetComposer();
+      message.success(t('tasksAdded', { count: createdTasks.length }));
       inputRef.current?.focus();
+      if (createdTasks.some((task) => task.id)) {
+        const nextMetadata = await listTaskMetadata(supabase, user.id);
+        setRecurrences(nextMetadata.recurrences);
+      }
     }
 
     setAdding(false);
   };
 
   const handleAiBreakdown = async () => {
-    if (breakingDown) return;
+    if (breakingDown) {
+      return;
+    }
 
     const goal = inputValue.trim();
     if (!goal) {
       message.warning(t('aiGoalPrompt'));
       return;
     }
-    if (!user) return;
+
+    if (!user) {
+      return;
+    }
 
     setBreakingDown(true);
 
@@ -288,7 +399,7 @@ function HomeContent() {
       const provider = localStorage.getItem('ai_provider') || 'gemini';
       const baseUrl = localStorage.getItem('ai_base_url') || '';
       const model = localStorage.getItem('ai_model') || '';
-      
+
       if (!apiKey) {
         notification.error({
           title: t('aiFailed'),
@@ -299,7 +410,7 @@ function HomeContent() {
         return;
       }
 
-      const resp = await fetch('/api/ai/breakdown', {
+      const response = await fetch('/api/ai/breakdown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ goal, apiKey, provider, baseUrl, model }),
@@ -308,33 +419,69 @@ function HomeContent() {
 
       clearTimeout(timeoutId);
 
-      if (!resp.ok) {
-        const errorData = await resp.json().catch(() => ({}));
-        throw new Error(errorData.error || t('aiFailed'));
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(getApiErrorMessage(errorData, t('aiFailed')));
       }
 
-      const tasks: unknown = await resp.json();
-      if (!isValidAiBreakdownTasks(tasks)) {
-        throw new Error('AI 返回的数据格式不正确，请稍后重试');
+      const aiTasks: unknown = await response.json();
+      if (!isValidAiBreakdownTasks(aiTasks)) {
+        throw new Error(t('aiInvalidFormat'));
       }
 
-      const newTodos = tasks.map((task) => ({
-        text: encodeAiBreakdownText(goal, task.title),
-        priority: task.priority === 'high' ? 'urgent' : 'normal',
+      const parentSortOrder = Date.now();
+      const { data: parentTask, error: parentError } = await supabase
+        .from('tasks')
+        .insert({
+          title: goal,
+          notes: '',
+          is_completed: false,
+          priority: 3,
+          user_id: user.id,
+          project_id: composerProjectId,
+          section_id: composerSectionId,
+          due_at: scheduledDate,
+          completed_at: null,
+          sort_order: parentSortOrder,
+          source: 'ai_plan',
+        })
+        .select(TASK_SELECT)
+        .single();
+
+      if (parentError || !parentTask) {
+        throw parentError ?? new Error('Failed to create AI parent task.');
+      }
+
+      const parentTaskRow = coerceTaskRows([parentTask])[0];
+      if (!parentTaskRow) {
+        throw new Error('Failed to normalize AI parent task.');
+      }
+
+      const childRows = aiTasks.map((task, index) => ({
+        title: task.title.trim(),
+        notes: '',
         is_completed: false,
+        priority: priorityFromAi(task.priority),
         user_id: user.id,
+        project_id: composerProjectId,
+        section_id: composerSectionId,
+        due_at: scheduledDate,
+        completed_at: null,
+        sort_order: parentSortOrder - index - 1,
+        source: 'ai_breakdown',
+        parent_id: String(parentTaskRow.id),
       }));
 
-      const { data, error } = await supabase.from('todos').insert(newTodos).select();
+      const { data, error } = await supabase.from('tasks').insert(childRows).select(TASK_SELECT);
 
-      if (error) {
-        throw error;
+      if (error || !data) {
+        await supabase.from('tasks').delete().eq('id', String(parentTaskRow.id)).eq('user_id', user.id);
+        throw error ?? new Error('Failed to create AI subtasks.');
       }
 
-      setTodos((prev) => [...(data || []), ...prev]);
-      setInputValue('');
-      setNewPriority('normal');
-      setCurrentPage(1);
+      const hydrated = hydrateTasks(coerceTaskRows([parentTaskRow, ...data]));
+      setTasks((prev) => [...getVisibleTasks(hydrated), ...prev]);
+      resetComposer();
       message.success(t('aiSuccess'));
     } catch (error: unknown) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -357,18 +504,49 @@ function HomeContent() {
   };
 
   const toggleComplete = async (id: string) => {
-    if (!user) return;
-    const target = todos.find((todo) => todo.id === id);
-    if (!target) return;
+    if (!user) {
+      return;
+    }
+
+    const target = tasks.find((task) => task.id === id);
+    if (!target) {
+      return;
+    }
 
     setTogglingIds((prev) => new Set(prev).add(id));
-    const newStatus = !target.is_completed;
+    const recurrence = recurrences.find((item) => item.task_id === id);
 
-    const { error } = await supabase
-      .from('todos')
-      .update({ is_completed: newStatus })
-      .eq('id', id)
-      .eq('user_id', user.id);
+    if (!target.is_completed && recurrence?.rule && ['daily', 'weekly', 'weekdays'].includes(recurrence.rule)) {
+      const { nextDueAt, error } = await advanceRecurringTask(
+        supabase,
+        user.id,
+        id,
+        recurrence.rule as RecurrenceRule,
+        target.due_at
+      );
+
+      if (error) {
+        notification.error({
+          title: t('statusUpdateFailed'),
+          description: error.message,
+          placement: 'topRight',
+        });
+      } else {
+        setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, due_at: nextDueAt, is_completed: false, completed_at: null } : task)));
+        const nextMetadata = await listTaskMetadata(supabase, user.id);
+        setRecurrences(nextMetadata.recurrences);
+        message.success(t('recurringAdvanced'));
+      }
+
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+
+    const { updates, error } = await toggleTaskComplete(supabase, user.id, target);
 
     if (error) {
       notification.error({
@@ -377,8 +555,8 @@ function HomeContent() {
         placement: 'topRight',
       });
     } else {
-      setTodos((prev) =>
-        prev.map((todo) => (todo.id === id ? { ...todo, is_completed: newStatus } : todo))
+      setTasks((prev) =>
+        prev.map((task) => (task.id === id ? { ...task, ...updates } : task))
       );
     }
 
@@ -389,10 +567,12 @@ function HomeContent() {
     });
   };
 
-  const handleUpdate = async (id: string, updates: Partial<Todo>) => {
-    if (!user) return;
+  const handleUpdate = async (id: string, updates: Partial<Task>) => {
+    if (!user) {
+      return;
+    }
 
-    const { error } = await supabase.from('todos').update(updates).eq('id', id).eq('user_id', user.id);
+    const { error } = await updateTask(supabase, user.id, id, updates);
 
     if (error) {
       notification.error({
@@ -400,14 +580,79 @@ function HomeContent() {
         description: error.message,
         placement: 'topRight',
       });
-    } else {
-      setTodos((prev) => prev.map((todo) => (todo.id === id ? { ...todo, ...updates } : todo)));
+      return;
     }
+
+    setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, ...updates } : task)));
+  };
+
+  const handleCreateSubtask = async (parent: DisplayTask, title: string) => {
+    if (!user) {
+      return;
+    }
+
+    const { data, error } = await createTask(supabase, {
+      title,
+      notes: '',
+      is_completed: false,
+      priority: parent.priority,
+      user_id: user.id,
+      project_id: parent.project_id,
+      section_id: parent.section_id,
+      parent_id: parent.id,
+      due_at: parent.due_at,
+      completed_at: null,
+      sort_order: Date.now(),
+      source: 'manual',
+    });
+
+    if (error) {
+      notification.error({
+        title: t('addFailed'),
+        description: error.message,
+        placement: 'topRight',
+      });
+      return;
+    }
+
+    setTasks((prev) => (data ? [data, ...prev] : prev));
+    message.success(t('taskAdded'));
+  };
+
+  const handleUpdateMetadata = async (
+    task: DisplayTask,
+    metadata: { labelIds?: string[]; reminderAt?: string | null; recurrenceRule?: RecurrenceRule | null }
+  ) => {
+    if (!user) {
+      return;
+    }
+
+    const [labelResult, reminderResult, recurrenceResult] = await Promise.all([
+      metadata.labelIds ? setTaskLabels(supabase, user.id, task.id, metadata.labelIds) : Promise.resolve({ error: null }),
+      metadata.reminderAt !== undefined ? upsertReminder(supabase, user.id, task.id, metadata.reminderAt) : Promise.resolve({ error: null }),
+      metadata.recurrenceRule !== undefined
+        ? upsertRecurrence(supabase, user.id, task.id, metadata.recurrenceRule, task.due_at)
+        : Promise.resolve({ error: null }),
+    ]);
+
+    const error = labelResult.error || reminderResult.error || recurrenceResult.error;
+    if (error) {
+      notification.error({ title: t('updateFailed'), description: error.message, placement: 'topRight' });
+      return;
+    }
+
+    const nextMetadata = await listTaskMetadata(supabase, user.id);
+    setLabels(nextMetadata.labels);
+    setTaskLabelsState(nextMetadata.taskLabels);
+    setReminders(nextMetadata.reminders);
+    setRecurrences(nextMetadata.recurrences);
   };
 
   const handleClearCompleted = () => {
-    const completedIds = todos.filter((t) => t.is_completed).map((t) => t.id);
-    if (completedIds.length === 0) return;
+    const completedIds = todayTasks.filter((task) => task.is_completed).map((task) => task.id);
+    if (completedIds.length === 0) {
+      return;
+    }
 
     modal.confirm({
       title: t('clearCompletedTitle'),
@@ -415,16 +660,16 @@ function HomeContent() {
       okText: t('clearCompletedOk'),
       okType: 'danger',
       onOk: async () => {
-        const { error } = await supabase
-          .from('todos')
-          .delete()
-          .in('id', completedIds)
-          .eq('user_id', user?.id);
+        if (!user) {
+          return;
+        }
+
+        const { error } = await deleteTasks(supabase, user.id, completedIds);
 
         if (error) {
           notification.error({ title: t('clearCompleted'), description: error.message });
         } else {
-          setTodos((prev) => prev.filter((t) => !t.is_completed));
+          setTasks((prev) => prev.filter((task) => !completedIds.includes(task.id)));
           message.success(t('clearCompletedSuccess'));
         }
       },
@@ -439,11 +684,24 @@ function HomeContent() {
       okText: t('deleteOk'),
       okType: 'danger',
       cancelText: t('cancel'),
-      async onOk() {
-        if (!user) return;
+      onOk: async () => {
+        if (!user) {
+          return;
+        }
+
+        const target = tasks.find((task) => task.id === id);
+        const relatedIds = [id];
+
+        if (target?.parent_id) {
+          const siblingCount = tasks.filter((task) => task.parent_id === target.parent_id).length;
+          if (siblingCount === 1) {
+            relatedIds.push(target.parent_id);
+          }
+        }
+
         setDeletingIds((prev) => new Set(prev).add(id));
 
-        const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', user.id);
+        const { error } = await deleteTasks(supabase, user.id, relatedIds);
 
         if (error) {
           notification.error({
@@ -452,7 +710,7 @@ function HomeContent() {
             placement: 'topRight',
           });
         } else {
-          setTodos((prev) => prev.filter((todo) => todo.id !== id));
+          setTasks((prev) => prev.filter((task) => !relatedIds.includes(task.id)));
           message.success(t('deleteSuccess'));
         }
 
@@ -465,16 +723,24 @@ function HomeContent() {
     });
   };
 
-  const renderTodoRow = (item: ParsedTodo, index: number) => (
+  const renderTaskRow = (item: DisplayTask) => (
     <TodoItem
-      key={item.id}
+      key={`${item.id}:${item.updated_at}`}
       item={item}
-      index={index}
       togglingIds={togglingIds}
       deletingIds={deletingIds}
       onToggle={toggleComplete}
       onDelete={handleDelete}
       onUpdate={handleUpdate}
+      onCreateSubtask={handleCreateSubtask}
+      onUpdateMetadata={handleUpdateMetadata}
+      projects={projects}
+      sections={sections}
+      parentCandidates={tasks}
+      labels={labels}
+      taskLabelIds={taskLabels.filter((label) => label.task_id === item.id).map((label) => label.label_id)}
+      reminder={reminders.find((reminder) => reminder.task_id === item.id) ?? null}
+      recurrence={recurrences.find((recurrence) => recurrence.task_id === item.id) ?? null}
     />
   );
 
@@ -496,6 +762,8 @@ function HomeContent() {
     );
   }
 
+  const sectionOptions = sections.filter((section) => section.project_id === composerProjectId);
+
   return (
     <section className="workspace-home">
       <section className="hero-strip">
@@ -507,12 +775,13 @@ function HomeContent() {
         >
           <span className="eyebrow secondary-label">{t('todayDashboard')}</span>
           <h2 className="editorial-header">
-            {t('goodMorning')}{user?.firstName || user?.username || t('friend')}
+            {t('goodMorning')}
+            {user?.username || user?.firstName || t('friend')}
           </h2>
         </motion.div>
 
         <div className="hero-stats">
-          <motion.div 
+          <motion.div
             className="hero-stat-card bento-small"
             whileHover={{ scale: 1.05, y: -5 }}
             transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -520,7 +789,7 @@ function HomeContent() {
             <strong className="editorial-header">{focusScore}%</strong>
             <span className="secondary-label">{t('focusScore')}</span>
           </motion.div>
-          <motion.div 
+          <motion.div
             className="hero-stat-card soft bento-small"
             whileHover={{ scale: 1.05, y: -5 }}
             transition={{ type: 'spring', stiffness: 300, damping: 20 }}
@@ -531,46 +800,95 @@ function HomeContent() {
         </div>
       </section>
 
-      <motion.section 
+      <motion.section
         className="composer-panel floating"
         initial={{ y: 30, opacity: 0, scale: 0.98 }}
         animate={{ y: 0, opacity: 1, scale: 1 }}
-        transition={{ 
+        transition={{
           type: 'spring',
           stiffness: 260,
           damping: 20,
-          delay: 0.2
+          delay: 0.2,
         }}
         whileHover={{ scale: 1.005 }}
       >
         <AnimatePresence>
           {breakingDown && (
-            <motion.div 
-              className="ai-progress-overlay"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
+            <motion.div className="ai-progress-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <div className="ai-progress-shimmer" />
               <div className="ai-progress-pulse" />
               <span className="ai-progress-label">{t('aiThinking')}</span>
             </motion.div>
           )}
         </AnimatePresence>
-        <div className="composer-icon">
-          <ThunderboltOutlined />
+
+        <div className="composer-entry">
+          <div className="composer-icon">
+            <ThunderboltOutlined />
+          </div>
+
+          <Input.TextArea
+            ref={inputRef}
+            className="composer-input"
+            variant="borderless"
+            placeholder={t('composerPlaceholder')}
+            value={inputValue}
+            onChange={(event) => setInputValue(event.target.value)}
+            onPressEnter={(event) => {
+              if (!event.shiftKey) {
+                event.preventDefault();
+                void handleAdd();
+              }
+            }}
+            autoSize={{ minRows: 1, maxRows: 5 }}
+            disabled={adding || breakingDown}
+          />
         </div>
-        <Input
-          ref={inputRef}
-          className="composer-input"
-          variant="borderless"
-          placeholder={t('composerPlaceholder')}
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onPressEnter={handleAdd}
-          disabled={adding || breakingDown}
-        />
+
         <div className="composer-actions">
+          <Select
+            value={composerProjectId ?? INBOX_PROJECT_SELECT_VALUE}
+            onChange={(value) => {
+              const nextProjectId = value === INBOX_PROJECT_SELECT_VALUE ? null : String(value);
+              setComposerProjectId(nextProjectId);
+              setComposerSectionId(null);
+            }}
+            options={[
+              { label: t('inboxProject'), value: INBOX_PROJECT_SELECT_VALUE },
+              ...projects.map((project) => ({ label: project.name, value: project.id })),
+            ]}
+            placeholder={t('chooseProject')}
+            style={{ minWidth: 140 }}
+            allowClear
+            disabled={adding || breakingDown}
+          />
+          <Select
+            value={composerSectionId ?? NO_SECTION_SELECT_VALUE}
+            onChange={(value) => {
+              setComposerSectionId(value === NO_SECTION_SELECT_VALUE ? null : String(value));
+            }}
+            options={[
+              { label: t('noSection'), value: NO_SECTION_SELECT_VALUE },
+              ...sectionOptions.map((section) => ({ label: section.name, value: section.id })),
+            ]}
+            placeholder={t('chooseSection')}
+            style={{ minWidth: 140 }}
+            allowClear
+            disabled={adding || breakingDown || !composerProjectId}
+          />
+          <Segmented
+            options={prioritySegmentOptions()}
+            value={newPriority}
+            onChange={(value) => setNewPriority(value as TaskPriority)}
+            disabled={adding || breakingDown}
+          />
+          <DatePicker
+            value={scheduledDate ? dayjs(scheduledDate) : null}
+            onChange={(value: Dayjs | null) => setScheduledDate(value ? value.startOf('day').toISOString() : null)}
+            allowClear
+            placeholder={t('scheduleOptional')}
+            disabled={adding || breakingDown}
+          />
           <Button
             size="large"
             type="text"
@@ -613,7 +931,10 @@ function HomeContent() {
                   key={tab.key}
                   type="button"
                   className={activeTab === tab.key ? 'filter-pill active' : 'filter-pill'}
-                  onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                  onClick={() => {
+                    setActiveTab(tab.key as typeof activeTab);
+                    setCurrentPage(1);
+                  }}
                 >
                   {tab.label}
                 </button>
@@ -633,7 +954,7 @@ function HomeContent() {
                   <motion.div key="skeleton" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                     <Skeleton active paragraph={{ rows: 6 }} />
                   </motion.div>
-                ) : filteredTodos.length === 0 ? (
+                ) : filteredTasks.length === 0 ? (
                   <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                     <Empty
                       image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -654,28 +975,25 @@ function HomeContent() {
                   </motion.div>
                 ) : (
                   <motion.div key="list" className="task-list-stack">
-                    {todoListEntries.map((entry, index) => {
+                    {todoListEntries.map((entry) => {
                       if (entry.type === 'single') {
-                        return renderTodoRow(entry.todo, index);
+                        return renderTaskRow(entry.task);
                       }
 
                       return (
-                        <motion.section 
-                          layout
-                          key={entry.key} 
-                          className="task-group"
-                        >
+                        <motion.section layout key={entry.key} className="task-group">
                           <div className="task-group-head">
                             <div>
                               <span className="eyebrow secondary-label">{t('aiBreakdownTag')}</span>
                               <h4 className="editorial-header" style={{ fontSize: '1.4rem' }}>{entry.title}</h4>
                             </div>
+                            <Button type="text" size="small" onClick={() => toggleGroupCollapsed(entry.key)}>
+                              {collapsedGroupIds.has(entry.key) ? t('expand') : t('collapse')}
+                            </Button>
                           </div>
-                          <div className="task-group-list">
-                            {entry.todos.map((todo, todoIndex) =>
-                              renderTodoRow(todo, todoIndex)
-                            )}
-                          </div>
+                          {!collapsedGroupIds.has(entry.key) && (
+                            <div className="task-group-list">{entry.tasks.map((task) => renderTaskRow(task))}</div>
+                          )}
                         </motion.section>
                       );
                     })}
@@ -684,7 +1002,7 @@ function HomeContent() {
                         current={currentPage}
                         pageSize={pageSize}
                         total={allTodoListEntries.length}
-                        onChange={(page) => setCurrentPage(page)}
+                        onChange={setCurrentPage}
                         hideOnSinglePage
                         showSizeChanger={false}
                         className="custom-pagination"
@@ -699,7 +1017,7 @@ function HomeContent() {
 
         <aside className="insight-column">
           <section className="dashboard-card bento-glow">
-            <Tabs 
+            <Tabs
               defaultActiveKey="1"
               items={[
                 {
@@ -733,7 +1051,7 @@ function HomeContent() {
                         </div>
                       </div>
                     </div>
-                  )
+                  ),
                 },
                 {
                   key: '2',
@@ -745,30 +1063,28 @@ function HomeContent() {
                         {tomorrowPreview.length === 0 ? (
                           <p className="placeholder-copy">{t('placeholderPreview')}</p>
                         ) : (
-                          tomorrowPreview.map((todo, index) => {
-                            return (
-                              <div key={todo.id} className="tomorrow-item">
-                                <span className="tomorrow-dot" />
-                                <div>
-                                  <p>{todo.displayText}</p>
-                                  <span>{index === 0 ? (language === 'zh' ? '优先处理' : 'Top priority') : (language === 'zh' ? '后续衔接' : 'Next bridge')}</span>
-                                </div>
+                          tomorrowPreview.map((task, index) => (
+                            <div key={task.id} className="tomorrow-item">
+                              <span className="tomorrow-dot" />
+                              <div>
+                                <p>{task.title}</p>
+                                <span>{index === 0 ? t('topPriority') : t('nextBridge')}</span>
                               </div>
-                            );
-                          })
+                            </div>
+                          ))
                         )}
                       </div>
                     </div>
-                  )
+                  ),
                 },
                 {
                   key: '3',
-                  label: 'Ritual',
+                  label: t('ritual'),
                   children: (
                     <div className="tab-pane">
                       <div className="wisdom-mini">
-                         <FireOutlined />
-                         <p>{t('wisdomQuote')}</p>
+                        <FireOutlined />
+                        <p>{t('wisdomQuote')}</p>
                       </div>
                       <div className="mini-stats-row">
                         <div className="mini-stat-item">
@@ -776,13 +1092,13 @@ function HomeContent() {
                           <strong>{completedCount}</strong>
                         </div>
                         <div className="mini-stat-item">
-                          <ClockCircleOutlined />
-                          <strong>{Math.max(1, Math.ceil(activeCount * 0.8))}h</strong>
+                          <RobotOutlined />
+                          <strong>{groupedEntries.length}</strong>
                         </div>
                       </div>
                     </div>
-                  )
-                }
+                  ),
+                },
               ]}
             />
           </section>
